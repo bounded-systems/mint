@@ -1,0 +1,48 @@
+# Reusable versioning check (workflow_call). A consuming repo calls this with a
+# ~6-line caller; no install, no published package. mint is checked out here and
+# run against the caller's .release/ intents, so fixing the tool once + bumping
+# the pin propagates to every repo.
+#
+#   jobs:
+#     version:
+#       uses: bounded-systems/mint/.github/workflows/version.yml@<sha>
+#
+# `mint plan` validates every intent (fails closed on a malformed one) and
+# previews the next version + changelog. It exits 0 when there are no intents.
+name: version (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "mint ref to run from (tag/sha for reproducibility)."
+        type: string
+        default: main
+      dir:
+        description: "Caller's intent directory."
+        type: string
+        default: .release
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Checkout mint
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: bounded-systems/mint
+          ref: ${{ inputs.ref }}
+          path: .mint
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+      - name: Install mint deps
+        working-directory: .mint
+        run: npm ci --no-audit --no-fund
+      - name: mint plan (validate intents + preview next version)
+        run: node .mint/mint.mjs plan --dir "${{ github.workspace }}/${{ inputs.dir }}"
