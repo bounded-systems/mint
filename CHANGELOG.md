@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 — 2026-06-24
+
+### Minor
+
+- mint release verb (signed tag) + SLSA provenance release workflow
+
 ## 0.1.0 — 2026-06-24
 
 ### Minor
