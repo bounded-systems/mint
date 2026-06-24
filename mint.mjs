@@ -73,6 +73,14 @@ async function cmdVersion() {
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
+  // Keep jsr.json in lockstep (JSR has its own manifest version).
+  try {
+    const jsr = await readJson("jsr.json");
+    jsr.version = p.nextVersion;
+    await writeFile("jsr.json", JSON.stringify(jsr, null, 2) + "\n");
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
 
   // Prepend the entry to CHANGELOG.md (create with a header if absent).
   let changelog = "";
