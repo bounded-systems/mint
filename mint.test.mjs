@@ -1,7 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { plan, resolveBump, renderEntry } from "./plan.mjs";
+import { plan, resolveBump, renderEntry, changelogEntry } from "./plan.mjs";
 import { parseIntent } from "./intents.mjs";
+
+const CHANGELOG = `# Changelog
+
+## 0.2.0 — 2026-06-24
+
+### Minor
+
+- mint release verb + SLSA release workflow
+
+## 0.1.0 — 2026-06-23
+
+### Minor
+
+- initial
+`;
 
 const date = "2026-06-23";
 
@@ -50,6 +65,17 @@ test("malformed input fails closed", () => {
   assert.throws(() => plan({ currentVersion: "1.0.0", intents: [{ bump: "huge", summary: "x" }], date }));
   assert.throws(() => plan({ currentVersion: "1.0.0", intents: [{ bump: "minor", summary: "" }], date }));
   assert.throws(() => plan({ currentVersion: "1.0.0", intents: [], date: "June 23" }));
+});
+
+test("changelogEntry extracts one version's section, not the next", () => {
+  const e = changelogEntry(CHANGELOG, "0.2.0");
+  assert.ok(e.startsWith("## 0.2.0 — 2026-06-24"));
+  assert.match(e, /mint release verb/);
+  assert.ok(!e.includes("0.1.0"), "must stop before the next heading");
+  const old = changelogEntry(CHANGELOG, "0.1.0");
+  assert.ok(old.startsWith("## 0.1.0"));
+  assert.match(old, /- initial/);
+  assert.equal(changelogEntry(CHANGELOG, "9.9.9"), null);
 });
 
 test("parseIntent reads front matter + summary, validates the contract", () => {

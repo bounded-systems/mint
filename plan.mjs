@@ -54,6 +54,22 @@ export function renderEntry({ nextVersion, date, intents }) {
   return lines.join("\n").trimEnd() + "\n";
 }
 
+// Extract the changelog section for a version: the `## <version> …` heading and
+// everything up to the next `## ` heading (or EOF). Pure; returns null if absent.
+// Used by `mint release` to derive the signed tag's annotation from the changelog.
+export function changelogEntry(changelog, version) {
+  const lines = changelog.split("\n");
+  const esc = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const head = new RegExp(`^## ${esc}(\\s|$)`);
+  const start = lines.findIndex((l) => head.test(l));
+  if (start < 0) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (lines[i].startsWith("## ")) { end = i; break; }
+  }
+  return lines.slice(start, end).join("\n").trim() + "\n";
+}
+
 // Pure plan: (currentVersion, intents, date) → release plan. Throws (via Zod) on
 // malformed input; returns null bump when there are no intents (nothing to release).
 export function plan(input) {

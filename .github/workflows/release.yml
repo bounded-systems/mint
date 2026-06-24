@@ -1,0 +1,35 @@
+name: release
+
+# On a vX.Y.Z tag (pushed by `mint release`): test, pack, SLSA-attest the tarball
+# (verifiable with `gh attestation verify`), and publish the GitHub release using
+# the tag's annotation (the changelog entry mint wrote) as the notes.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write      # create the GitHub release
+  id-token: write      # OIDC for SLSA attestation
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Pack the package
+        id: pack
+        run: echo "tgz=$(npm pack | tail -1)" >> "$GITHUB_OUTPUT"
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: ${{ steps.pack.outputs.tgz }}
+      - name: Publish GitHub release (notes from the tag annotation)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-from-tag "${{ steps.pack.outputs.tgz }}"

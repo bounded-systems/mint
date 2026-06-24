@@ -9,8 +9,12 @@
 // A verbspec-typed CLI/MCP surface (mirroring string-audit's audit.mjs/mcp.mjs)
 // is a follow-up; this skeleton wires the verbs directly against the Zod core.
 import { readFile, writeFile, unlink } from "node:fs/promises";
-import { plan } from "./plan.mjs";
+import { execFileSync } from "node:child_process";
+import { plan, changelogEntry } from "./plan.mjs";
 import { loadIntents } from "./intents.mjs";
+
+const git = (...a) => execFileSync("git", a, { encoding: "utf8" }).trim();
+const gitOk = (...a) => { try { execFileSync("git", a, { stdio: "ignore" }); return true; } catch { return false; } };
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -85,9 +89,45 @@ async function cmdVersion() {
   console.log(`Next: commit, then \`mint release\` to cut the signed tag.`);
 }
 
-function cmdRelease() {
-  console.error("mint release: not yet implemented — signed tag + SLSA attestation via anchored-chain is a follow-up (see bounded-systems/string-audit#43).");
-  process.exit(1);
+// Cut + push the release tag. Signs it when git signing is configured (else an
+// annotated tag with a warning); the annotation is the changelog entry. Verifiable
+// SLSA provenance is attached in CI by release.yml on tag push. --dry-run previews;
+// --remote sets the push target (default origin); --no-push skips pushing.
+async function cmdRelease() {
+  const dryRun = has("--dry-run");
+  const noPush = has("--no-push");
+  const remote = flag("--remote") ?? "origin";
+
+  const pkg = await readJson("package.json");
+  const version = pkg.version;
+  if (!version) { console.error("mint release: package.json has no version"); process.exit(1); }
+  const tag = `v${version}`;
+
+  // The changelog must document this version (run `mint version` first).
+  let changelog = "";
+  try { changelog = await readFile("CHANGELOG.md", "utf8"); } catch { /* none */ }
+  const entry = changelogEntry(changelog, version);
+  if (!entry) {
+    console.error(`mint release: no CHANGELOG.md entry for ${version} — run \`mint version\` first.`);
+    process.exit(1);
+  }
+
+  // Guards: in a clean git tree, tag not already present.
+  if (gitOk("rev-parse", tag)) { console.error(`mint release: tag ${tag} already exists.`); process.exit(1); }
+  const dirty = git("status", "--porcelain");
+  if (dirty) { console.error("mint release: working tree not clean — commit the release first."); process.exit(1); }
+
+  const signed = git("config", "--get", "commit.gpgsign") === "true" || gitOk("config", "--get", "user.signingkey");
+  if (dryRun) {
+    console.log(`mint release (dry run): would create ${signed ? "signed" : "annotated"} tag ${tag} and ${noPush ? "skip push" : `push to ${remote}`}.\n`);
+    console.log(entry);
+    return;
+  }
+
+  git("tag", signed ? "-s" : "-a", tag, "-m", entry);
+  console.log(`mint: created ${signed ? "signed" : "annotated (unsigned — no git signing key configured)"} tag ${tag}`);
+  if (!noPush) { git("push", remote, tag); console.log(`mint: pushed ${tag} to ${remote}`); }
+  console.log(`Next: release.yml attaches SLSA provenance on tag push — verify with \`gh attestation verify\`.`);
 }
 
 const COMMANDS = { plan: cmdPlan, version: cmdVersion, release: cmdRelease };
