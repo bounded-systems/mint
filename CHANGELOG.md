@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.15 — 2026-06-29
+
+### Patch
+
+- add repository field to package.json — required by npm provenance verification to match the GitHub repo URL in the OIDC claims
+
 ## 0.4.14 — 2026-06-29
 
 ### Patch

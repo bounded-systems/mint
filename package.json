@@ -1,6 +1,6 @@
 {
   "name": "@bounded-systems/mint",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "description": "Deterministic versioning capability — intent files in, signed release out. A seam over semver: own the flow, delegate the arithmetic.",
   "type": "module",
   "bin": {
@@ -14,6 +14,10 @@
   "scripts": {
     "test": "node --test",
     "plan": "node mint.mjs plan"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bounded-systems/mint.git"
   },
   "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
