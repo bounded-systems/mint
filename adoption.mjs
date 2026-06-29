@@ -17,7 +17,7 @@ const write = process.argv.includes("--write");
 const token = process.env.GITHUB_TOKEN;
 if (!token) { console.error("adoption: GITHUB_TOKEN required"); process.exit(1); }
 const org = process.env.ORG ?? "bounded-systems";
-const MINT_REF = process.env.MINT_REF ?? "7bc5c9c0826aa7bcb1fc78c8286ab6cc6311630a";
+const MINT_REF = process.env.MINT_REF ?? "v0.3.1"; // 6656a2c — first tag with release-provenance.yml
 
 async function ghReq(path, { method = "GET", body } = {}) {
   const r = await fetch(`https://api.github.com/${path}`, {
