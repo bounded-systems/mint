@@ -76,17 +76,24 @@ jobs:
           node-version: "24"                       # npm 11.15.0+ required for staged publishing
           registry-url: "https://registry.npmjs.org"
       - run: npm ci --no-audit --no-fund
-      - name: Stage package on npm (OIDC trusted publishing — no token)
+      - name: Publish or stage on npm (OIDC trusted publishing — no token)
         id: stage
-        continue-on-error: true # brand-new npm pkg needs a trusted-publisher seed first; JSR is the source of truth, must not be blocked
+        continue-on-error: true # JSR is the source of truth; npm failure must not block it
         run: |
           npm install -g npm@latest                # ensure npm 11.15.0+ for staged publishing
           echo "npm version: $(npm --version)"
-          # tee streams output live (visible in logs) while also capturing it;
-          # || true prevents set -e from silently swallowing the error + output.
-          npm stage publish --access public --provenance 2>&1 | tee /tmp/stage-out.txt || true
+          PKG=$(node -p "require('./package.json').name")
+          # npm stage publish requires the package to already exist on the registry.
+          # On first publish, fall back to npm publish to seed it; all subsequent
+          # releases go through the staged flow (human 2FA approval required).
+          if npm view "$PKG" version 2>/dev/null; then
+            echo "package exists — using npm stage publish"
+            npm stage publish --access public --provenance 2>&1 | tee /tmp/stage-out.txt || true
+          else
+            echo "first publish — seeding with npm publish (staged publishing requires existing package)"
+            npm publish --access public --provenance 2>&1 | tee /tmp/stage-out.txt || true
+          fi
           STAGE_OUT=$(cat /tmp/stage-out.txt)
-          # Extract the stage ID from npm output (format varies; fall back to empty string)
           STAGE_ID=$(echo "$STAGE_OUT" | grep -oE '[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}' | head -1 || true)
           echo "stage_id=${STAGE_ID}" >> "$GITHUB_OUTPUT"
       - name: Surface approval instructions

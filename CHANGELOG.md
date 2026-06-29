@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 — 2026-06-29
+
+### Patch
+
+- seed npm first publish — detect new package and fall back to `npm publish` before staging is available
+
 ## 0.4.2 — 2026-06-29
 
 ### Patch
