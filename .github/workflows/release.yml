@@ -1,8 +1,10 @@
 name: release
 
 # On a vX.Y.Z tag (pushed by `mint release`):
-#   release  — test, pack, SLSA-attest the tarball, publish the GitHub release
-#              (notes from the tag annotation mint wrote).
+#   release  — test, pack, SLSA-attest the tarball, emit + keyless-sign the
+#              in-toto release Statement (tag → version plan → commit), publish
+#              the GitHub release (notes from the tag annotation mint wrote) with
+#              the statement + its Sigstore bundle attached.
 #   publish  — publish to npm + JSR via OIDC trusted publishing. No tokens, ever:
 #              authentication is the workflow's OIDC identity (id-token: write).
 on:
@@ -11,7 +13,7 @@ on:
 
 permissions:
   contents: write      # create the GitHub release
-  id-token: write      # OIDC — SLSA attestation, npm trusted publishing, JSR
+  id-token: write      # OIDC — SLSA attestation, cosign keyless, npm/JSR publishing
   attestations: write
 
 jobs:
@@ -31,10 +33,28 @@ jobs:
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: ${{ steps.pack.outputs.tgz }}
+      # Release provenance: the deterministic in-toto Statement binding this tag to
+      # its version plan + commit. `mint attest` reproduces byte-for-byte what
+      # `mint release` wrote locally, now with the CI builder identity filled in.
+      - name: Emit the in-toto release Statement
+        run: node mint.mjs attest --out mint-release.intoto.json
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.7.0
+      # Keyless: no key material — the signature is bound to this workflow's OIDC
+      # identity via Fulcio + logged in Rekor. The self-contained --bundle is the
+      # same artifact @bounded-systems/verify consumes (cosign verify-blob).
+      - name: Keyless-sign the release Statement (cosign, OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: cosign sign-blob --yes --bundle mint-release.intoto.sigstore.json mint-release.intoto.json
       - name: Publish GitHub release (notes from the tag annotation)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-from-tag "${{ steps.pack.outputs.tgz }}"
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-from-tag \
+            "${{ steps.pack.outputs.tgz }}" \
+            mint-release.intoto.json \
+            mint-release.intoto.sigstore.json
 
   publish:
     needs: release

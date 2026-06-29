@@ -1,2 +1,7 @@
 node_modules/
 adoption-report.json
+
+# Local release artifacts (CI regenerates + keyless-signs them; never committed).
+*.intoto.json
+*.intoto.sigstore.json
+*.tgz

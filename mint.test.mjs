@@ -1,7 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { plan, resolveBump, renderEntry, changelogEntry } from "./plan.mjs";
 import { parseIntent } from "./intents.mjs";
+import {
+  releaseStatement,
+  canonicalize,
+  dssePAE,
+  statementDigest,
+  STATEMENT_TYPE,
+  RELEASE_PREDICATE_TYPE,
+  DSSE_PAYLOAD_TYPE,
+} from "./release.mjs";
 
 const CHANGELOG = `# Changelog
 
@@ -83,4 +93,87 @@ test("parseIntent reads front matter + summary, validates the contract", () => {
   assert.deepEqual(i, { bump: "minor", summary: "scan: promote to a verb" });
   assert.throws(() => parseIntent("no front matter here"), /missing front-matter/);
   assert.throws(() => parseIntent("---\nbump: minor\n---\n"), /summary/); // empty body
+});
+
+// ── mint release — provenance core (release.mjs) ────────────────────────────
+
+const REL = {
+  version: "0.3.0",
+  tag: "v0.3.0",
+  commit: "0123456789abcdef0123456789abcdef01234567",
+  date: "2026-06-29",
+  changelog: changelogEntry(CHANGELOG, "0.2.0"),
+  producer: "@bounded-systems/mint",
+};
+
+test("release statement binds tag → version plan → commit (in-toto Statement v1)", () => {
+  const s = releaseStatement(REL);
+  assert.equal(s._type, STATEMENT_TYPE);
+  assert.equal(s._type, "https://in-toto.io/Statement/v1");
+  assert.equal(s.predicateType, RELEASE_PREDICATE_TYPE);
+  // subject IS the tag, anchored to the commit (in-toto gitCommit digest).
+  assert.deepEqual(s.subject, [{ name: "v0.3.0", digest: { gitCommit: REL.commit } }]);
+  assert.equal(s.predicate.version, "0.3.0");
+  assert.equal(s.predicate.tag, "v0.3.0");
+  assert.equal(s.predicate.commit, REL.commit);
+  // the version plan is bound by the byte-exact changelog digest.
+  assert.equal(s.predicate.plan.changelog, REL.changelog);
+  assert.equal(
+    s.predicate.plan.digest.sha256,
+    createHash("sha256").update(REL.changelog, "utf8").digest("hex"),
+  );
+  // no builder ⇒ produced locally + unsigned.
+  assert.equal(s.predicate.builder, null);
+});
+
+test("release statement is deterministic — same inputs, byte-identical record", () => {
+  const a = releaseStatement(REL);
+  const b = releaseStatement({ ...REL });
+  assert.deepEqual(a, b);
+  assert.equal(canonicalize(a), canonicalize(b));
+  assert.equal(statementDigest(a), statementDigest(b));
+});
+
+test("canonicalize is key-order independent (stable digest + DSSE payload)", () => {
+  const a = canonicalize({ b: 1, a: { y: 2, x: 3 } });
+  const b = canonicalize({ a: { x: 3, y: 2 }, b: 1 });
+  assert.equal(a, b);
+  assert.equal(a, '{"a":{"x":3,"y":2},"b":1}');
+});
+
+test("CI builder is carried through (keyless signing identity)", () => {
+  const builder = {
+    repository: "bounded-systems/mint",
+    commit: REL.commit,
+    ref: "refs/tags/v0.3.0",
+    runId: "42",
+    workflowRef: "bounded-systems/mint/.github/workflows/release.yml@refs/tags/v0.3.0",
+    issuer: "https://token.actions.githubusercontent.com",
+  };
+  const s = releaseStatement({ ...REL, builder });
+  assert.deepEqual(s.predicate.builder, builder);
+  // local (null builder) and CI (builder) records differ — signing is recorded.
+  assert.notEqual(statementDigest(s), statementDigest(releaseStatement(REL)));
+});
+
+test("tag format is enforced — only v<semver> is accepted", () => {
+  assert.throws(() => releaseStatement({ ...REL, tag: "0.3.0" }), /tag must be v<semver>/);
+  assert.throws(() => releaseStatement({ ...REL, tag: "release-0.3.0" }), /tag must be v<semver>/);
+  assert.throws(() => releaseStatement({ ...REL, tag: "v0.3" }), /tag must be v<semver>/);
+  // prerelease + build metadata are valid semver tags.
+  assert.equal(releaseStatement({ ...REL, tag: "v0.3.0-rc.1" }).predicate.tag, "v0.3.0-rc.1");
+});
+
+test("release statement fails closed on malformed input", () => {
+  assert.throws(() => releaseStatement({ ...REL, commit: "nothex!" }), /git object id/);
+  assert.throws(() => releaseStatement({ ...REL, date: "June 29" }), /YYYY-MM-DD/);
+  assert.throws(() => releaseStatement({ ...REL, changelog: "" }), /changelog/);
+});
+
+test("DSSE pre-authentication encoding wraps the canonical statement", () => {
+  const s = releaseStatement(REL);
+  const pae = dssePAE(s).toString("utf8");
+  const payload = canonicalize(s);
+  assert.ok(pae.startsWith(`DSSEv1 ${DSSE_PAYLOAD_TYPE.length} ${DSSE_PAYLOAD_TYPE} ${Buffer.byteLength(payload)} `));
+  assert.ok(pae.endsWith(payload));
 });

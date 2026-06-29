@@ -15,4 +15,4 @@ scan: promote to a verb (CLI + MCP) + shared Zod type contracts
 
 - `mint plan` — preview the next version + changelog entry (pure; pass `--date` to pin it).
 - `mint version` — apply: bump `package.json` + lockfile, prepend `CHANGELOG.md`, consume these intents.
-- `mint release` — cut + sign the tag *(coming soon)*.
+- `mint release` — cut the `v<version>` tag + emit the in-toto release provenance (keyless-signed in CI). `--dry-run` previews it.

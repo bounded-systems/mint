@@ -58,6 +58,26 @@ jobs:
     with:
       ref: ${MINT_REF}
 `;
+const RELEASE_YML = `name: release
+
+# Release provenance via the bounded-systems mint capability. On a v<version> tag
+# (cut by \`mint release\`), emits the deterministic in-toto release Statement
+# (tag → version plan → commit), keyless-signs it (cosign/OIDC), and attaches it
+# to the GitHub release. Pinned to an immutable mint commit SHA; bump when mint tags.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # create / upload to the GitHub release
+  id-token: write   # OIDC — cosign keyless signing
+
+jobs:
+  release:
+    uses: bounded-systems/mint/.github/workflows/release-provenance.yml@${MINT_REF} # mint
+    with:
+      ref: ${MINT_REF}
+`;
 const RELEASE_README = `# Release intents
 
 This repo uses [@bounded-systems/mint](https://github.com/bounded-systems/mint) for
@@ -93,10 +113,11 @@ async function openAdoptionPR(repo) {
   const made = await ghReq(`repos/${org}/${repo}/git/refs`, { method: "POST", body: { ref: `refs/heads/${branch}`, sha: ref.object.sha } });
   if (!made) { console.warn(`  ${repo}: branch exists or create failed — skipping`); return null; }
   await putFile(repo, ".github/workflows/version.yml", VERSION_YML, branch, "chore: adopt @bounded-systems/mint for versioning");
+  await putFile(repo, ".github/workflows/release.yml", RELEASE_YML, branch, "chore: adopt @bounded-systems/mint release provenance");
   await putFile(repo, ".release/README.md", RELEASE_README, branch, "chore: add .release intent directory");
   const pr = await ghReq(`repos/${org}/${repo}/pulls`, {
     method: "POST",
-    body: { title: "chore: adopt @bounded-systems/mint for versioning", head: branch, base, body: "Adopt the [mint](https://github.com/bounded-systems/mint) reusable version-check (validates `.release/` intents + previews the next bump on every PR). Org-wide versioning rollout — see bounded-systems/string-audit#43." },
+    body: { title: "chore: adopt @bounded-systems/mint for versioning", head: branch, base, body: "Adopt [mint](https://github.com/bounded-systems/mint): the reusable version-check (validates `.release/` intents + previews the next bump on every PR) **and** release provenance (on a `v*` tag, emits + keyless-signs the in-toto release Statement and attaches it to the release). Replaces hand-tagging. Org-wide rollout — see bounded-systems/string-audit#43." },
   });
   if (!pr?.number) return null;
   console.log(`  ✓ ${repo.padEnd(24)} PR #${pr.number}`);
