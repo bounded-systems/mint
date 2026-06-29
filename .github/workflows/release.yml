@@ -1,14 +1,14 @@
 name: release
 
 # On a vX.Y.Z tag (pushed by `mint release`):
-#   release     — test, pack, SLSA-attest the tarball, emit + keyless-sign the
-#                 in-toto release Statement (tag → version plan → commit), publish
-#                 the GitHub release (notes from the tag annotation mint wrote) with
-#                 the statement + its Sigstore bundle attached.
-#   jsr         — publish to JSR via OIDC (no token, immediate).
-#   npm-approve — gated by the `npm-publish` GitHub Environment (required reviewer).
-#                 A maintainer must approve in the Actions UI before npm publish
-#                 runs. The gate is the human approval step; no npm staging needed.
+#   release — test, pack, SLSA-attest the tarball, emit + keyless-sign the
+#             in-toto release Statement (tag → version plan → commit), publish
+#             the GitHub release (notes from the tag annotation mint wrote) with
+#             the statement + its Sigstore bundle attached.
+#   publish — gated by the `npm-publish` GitHub Environment (required reviewer).
+#             A maintainer approves in the Actions UI, then npm + JSR both publish
+#             via OIDC trusted publishing (no tokens). Add any future deploy targets
+#             here to gate them behind the same approval.
 #
 # This workflow covers: npm (staged) + JSR + GitHub release.
 # Out of scope here — triggered separately on the same tag:
@@ -66,32 +66,18 @@ jobs:
             mint-release.intoto.json \
             mint-release.intoto.sigstore.json
 
-  jsr:
+  publish:
     needs: release
     runs-on: ubuntu-latest
+    environment: npm-publish   # required reviewer gates all deploys below
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "24"
-      - run: npm ci --no-audit --no-fund
-      - name: Publish to JSR (OIDC — no token)
-        run: npx jsr publish --allow-slow-types
-
-  npm-approve:
-    needs: release
-    runs-on: ubuntu-latest
-    # The npm-publish environment provides the OIDC token scoped to this
-    # environment — required by the trusted publisher for npm stage publish.
-    # The required-reviewer gate also gives a human a chance to review the
-    # release before it lands in the npm staging queue.
-    environment: npm-publish
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: "24"                       # npm 11.15.0+ required for staged publishing
           registry-url: "https://registry.npmjs.org"
       - run: npm ci --no-audit --no-fund
       - name: Publish to npm (OIDC trusted publishing — no token)
         run: npm publish --access public --provenance
+      - name: Publish to JSR (OIDC — no token)
+        run: npx jsr publish --allow-slow-types

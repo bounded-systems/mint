@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.10 — 2026-06-29
+
+### Patch
+
+- unify npm + JSR behind a single publish job gated by the npm-publish GitHub Environment — one approval deploys to all registries
+
 ## 0.4.9 — 2026-06-29
 
 ### Patch
