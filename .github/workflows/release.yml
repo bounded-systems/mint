@@ -66,11 +66,26 @@ jobs:
             mint-release.intoto.json \
             mint-release.intoto.sigstore.json
 
-  stage:
+  jsr:
     needs: release
     runs-on: ubuntu-latest
-    outputs:
-      stage_id: ${{ steps.stage.outputs.stage_id }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+      - run: npm ci --no-audit --no-fund
+      - name: Publish to JSR (OIDC — no token)
+        run: npx jsr publish --allow-slow-types
+
+  npm-approve:
+    needs: release
+    runs-on: ubuntu-latest
+    # The npm-publish environment provides the OIDC token scoped to this
+    # environment — required by the trusted publisher for npm stage publish.
+    # The required-reviewer gate also gives a human a chance to review the
+    # release before it lands in the npm staging queue.
+    environment: npm-publish
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -80,7 +95,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Stage on npm (OIDC trusted publishing — no token)
         id: stage
-        continue-on-error: true # JSR is the source of truth; npm failure must not block it
+        continue-on-error: true
         run: |
           npm install -g npm@latest                # ensure npm 11.15.0+ for staged publishing
           echo "npm version: $(npm --version)"
@@ -102,22 +117,14 @@ jobs:
           STAGE_OUT=$(cat /tmp/stage-out.txt)
           STAGE_ID=$(echo "$STAGE_OUT" | grep -oE '[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}' | head -1 || true)
           echo "stage_id=${STAGE_ID}" >> "$GITHUB_OUTPUT"
-      - name: Publish to JSR (OIDC — no token)
-        run: npx jsr publish --allow-slow-types
-
-  npm-approve:
-    needs: stage
-    runs-on: ubuntu-latest
-    environment: npm-publish      # pauses here — required reviewer must approve in GitHub UI
-    steps:
-      - name: Approval instructions
+      - name: Surface approval instructions
         env:
-          STAGE_ID: ${{ needs.stage.outputs.stage_id }}
+          STAGE_ID: ${{ steps.stage.outputs.stage_id }}
         run: |
           {
             echo "## npm package staged — run this to publish"
             echo ""
-            echo "You approved the deployment gate. Now approve the staged package with 2FA:"
+            echo "The package is in the npm staging area. Approve it locally with 2FA:"
             echo ""
             if [ -n "$STAGE_ID" ]; then
               echo "**Stage ID:** \`${STAGE_ID}\`"

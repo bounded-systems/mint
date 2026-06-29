@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.8 — 2026-06-29
+
+### Patch
+
+- fix npm stage publish OIDC scope — move npm stage publish into the npm-approve job (environment: npm-publish) so the OIDC token carries the environment claim required by the trusted publisher
+
 ## 0.4.7 — 2026-06-29
 
 ### Patch
