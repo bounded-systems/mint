@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.13 — 2026-06-29
+
+### Patch
+
+- fix npm OIDC auth — restore registry-url and strip the injected empty _authToken before publishing so npm can fall through to its OIDC trusted-publishing exchange
+
 ## 0.4.12 — 2026-06-29
 
 ### Patch
