@@ -100,6 +100,31 @@ jobs:
 `adoption.mjs --write` drops both this caller and the `version.yml` caller into
 every publishable repo — the path off hand-tagging.
 
+## Publish (npm + JSR)
+
+mint ships from `release.yml` on each `v*` tag via **OIDC trusted publishing** —
+no `NPM_TOKEN`, no JSR token, ever. The package manifests are kept in lockstep by
+`mint version` (it bumps `package.json`, `package-lock.json`, **and** `jsr.json`).
+
+JSR-readiness is verified the same way CI publishes:
+
+```sh
+npx jsr publish --dry-run --allow-slow-types   # the path release.yml runs
+deno publish    --dry-run --allow-slow-types   # equivalent, Deno-native
+```
+
+`jsr.json` carries the SPDX `license` and a `publish.include` allowlist, so the
+published tarball is just the three exports + `mint.mjs`, `README`, `CHANGELOG`
+(no tests, lockfiles, or workflows). `@types/node` is a dev dependency so the
+JSR type-checker resolves mint's `node:` imports.
+
+> **One-time JSR link (manual, once):** before the first JSR publish, link the
+> package on [jsr.io](https://jsr.io) — create `@bounded-systems/mint` under the
+> `@bounded-systems` scope and connect it to the `bounded-systems/mint` GitHub
+> repo (Settings → "Link to a GitHub repository"). That GitHub link is what
+> authorizes the keyless OIDC publish; after it, every tagged release publishes
+> with no token.
+
 ## Library
 
 ```js
