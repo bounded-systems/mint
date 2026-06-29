@@ -1,0 +1,54 @@
+.gitignore
+  s_98e316d0b3248a::t_95839a5b80f600 3-7
+README.md
+  s_98e316d0b3248a::t_0e82d3dd3222ec 35,41-102,107,114-122,129,131
+.github/workflows/release-provenance.yml
+  s_98e316d0b3248a::t_a7e1e63bbd8774 1-81
+.github/workflows/release.yml
+  s_98e316d0b3248a::t_3aed1bece5d127 4-7,16,36-49,53-57
+mint.mjs
+  s_98e316d0b3248a::t_e7a57734743fa6 178-179,182-183,187-188,195-197
+  s_98e316d0b3248a::t_4212ff7c4f3708 99,102-119,121-124,127,133-154,156,158-177,185-186,189-191,199-204,206,209
+  s_98e316d0b3248a::t_f981eaf4b096bc 7-8,16
+  s_71a0aecf45d82c::t_a938e316e1be5f 198
+jsr.json
+  s_98e316d0b3248a::t_c27a676d178891 6-7
+mint.test.mjs
+  s_98e316d0b3248a::t_9aa2883887ae75 97-179
+  s_98e316d0b3248a::t_e1e4e5e23908b7 3,6-14
+release.mjs
+  s_98e316d0b3248a::t_25aa83ee021c00 1-130
+.release/mint-release-provenance.md
+  s_98e316d0b3248a::t_e5e7e06999de40 1-4
+package.json
+  s_98e316d0b3248a::t_f5b4d357b686ca 11-12
+.release/README.md
+  s_98e316d0b3248a::t_2a3342e5047f54 18
+adoption.mjs
+  s_98e316d0b3248a::t_195b534565fb25 61-80
+  s_98e316d0b3248a::t_b77b91d7c4f3f8 116,120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "58e4561f8bdb9d2cfc64e58733fac1ef828124e5",
+  "prompts": {},
+  "sessions": {
+    "s_71a0aecf45d82c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6f6e806-c9db-459c-ba56-79aa27861998",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    },
+    "s_98e316d0b3248a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8db980ee-eb6b-4866-832b-f795cef7f33c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
