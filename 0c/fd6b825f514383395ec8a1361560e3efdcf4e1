@@ -1,0 +1,37 @@
+package.json
+  s_98e316d0b3248a::t_bd31e7e4006515 22-24
+README.md
+  s_98e316d0b3248a::t_8d4c3172d33cdd 103-127
+jsr.json
+  s_98e316d0b3248a::t_bb533a1a54467b 4,9-19
+package-lock.json
+  s_98e316d0b3248a::t_d9b4ab0b2cebc1 17-29,44-50
+.github/workflows/release.yml
+  s_b71734bb523c2c::t_0ffc873c436bb7 8-11
+  s_b71734bb523c2c::t_c18b88078561c0 76,79-80,83-113
+  s_b71734bb523c2c::t_43b9fc8822f303 12-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "0cfd6b825f514383395ec8a1361560e3efdcf4e1",
+  "prompts": {},
+  "sessions": {
+    "s_98e316d0b3248a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8db980ee-eb6b-4866-832b-f795cef7f33c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    },
+    "s_b71734bb523c2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40b46a92-78d6-45ac-b98e-faa965b241e6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
