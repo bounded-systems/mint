@@ -1,0 +1,28 @@
+.github/workflows/release.yml
+  s_b71734bb523c2c::t_c7b5f00054b1d3 4-11
+  s_b71734bb523c2c::t_9cdfd156dc8988 69,72,82-83
+CHANGELOG.md
+  s_b71734bb523c2c::t_956150bef3480c 3-8
+jsr.json
+  s_b71734bb523c2c::t_c027e4087f2a68 3
+package-lock.json
+  s_b71734bb523c2c::t_cf9e87a6c5031c 3,9
+package.json
+  s_b71734bb523c2c::t_2f51bf4ba064ca 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "4d5af9a3b7f9355bafa203179a61fa2a50bad5c0",
+  "prompts": {},
+  "sessions": {
+    "s_b71734bb523c2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40b46a92-78d6-45ac-b98e-faa965b241e6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
