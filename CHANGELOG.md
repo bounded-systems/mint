@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.7 — 2026-06-29
+
+### Patch
+
+- retry staged npm publish — trusted publisher now has stage action + environment scoped to npm-publish
+
 ## 0.4.6 — 2026-06-29
 
 ### Patch
