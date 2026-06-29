@@ -1,0 +1,27 @@
+.github/npm-trusted-publisher.json
+  s_b71734bb523c2c::t_e77137ce6909e1 1-10
+CHANGELOG.md
+  s_b71734bb523c2c::t_b962e5c341228f 3-8
+jsr.json
+  s_b71734bb523c2c::t_6afc9915ae6e41 3
+package-lock.json
+  s_b71734bb523c2c::t_aa37b3e2b74d09 3,9
+package.json
+  s_b71734bb523c2c::t_1eda0731712713 3,18-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "ee612a05410f88581c972b9686549d90d51e36d4",
+  "prompts": {},
+  "sessions": {
+    "s_b71734bb523c2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40b46a92-78d6-45ac-b98e-faa965b241e6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
