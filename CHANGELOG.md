@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 — 2026-06-29
+
+### Minor
+
+- staged npm publishing — `npm stage publish` replaces direct publish; human 2FA approval gate before the package goes live
+
 ## 0.3.1 — 2026-06-29
 
 ### Patch
