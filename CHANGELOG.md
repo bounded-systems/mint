@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 — 2026-06-29
+
+### Patch
+
+- retry staged npm publish — trusted publisher updated to allow staging
+
 ## 0.4.1 — 2026-06-29
 
 ### Patch
