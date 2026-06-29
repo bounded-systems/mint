@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4 — 2026-06-29
+
+### Patch
+
+- first staged npm release — package now seeded, all future releases go through `npm stage publish` with human 2FA approval
+
 ## 0.4.3 — 2026-06-29
 
 ### Patch
