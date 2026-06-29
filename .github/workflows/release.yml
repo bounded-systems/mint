@@ -5,10 +5,12 @@ name: release
 #             in-toto release Statement (tag → version plan → commit), publish
 #             the GitHub release (notes from the tag annotation mint wrote) with
 #             the statement + its Sigstore bundle attached.
-#   publish — gated by the `npm-publish` GitHub Environment (required reviewer).
-#             A maintainer approves in the Actions UI, then npm + JSR both publish
-#             via OIDC trusted publishing (no tokens). Add any future deploy targets
-#             here to gate them behind the same approval.
+#   approve — gated by the `npm-publish` GitHub Environment (required reviewer).
+#             No-op job: a maintainer approves in the Actions UI, which unblocks
+#             all deploy jobs below. Add new deploy targets as separate jobs with
+#             needs: [release, approve].
+#   npm     — publish to npm via OIDC trusted publishing (no token).
+#   jsr     — publish to JSR via OIDC (no token).
 #
 # This workflow covers: npm (staged) + JSR + GitHub release.
 # Out of scope here — triggered separately on the same tag:
@@ -66,10 +68,16 @@ jobs:
             mint-release.intoto.json \
             mint-release.intoto.sigstore.json
 
-  publish:
+  approve:
     needs: release
     runs-on: ubuntu-latest
-    environment: npm-publish   # required reviewer gates all deploys below
+    environment: npm-publish   # required reviewer — approving here unblocks all deploys
+    steps:
+      - run: echo "Approved."
+
+  npm:
+    needs: [release, approve]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -79,5 +87,15 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Publish to npm (OIDC trusted publishing — no token)
         run: npm publish --access public --provenance
+
+  jsr:
+    needs: [release, approve]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+      - run: npm ci --no-audit --no-fund
       - name: Publish to JSR (OIDC — no token)
         run: npx jsr publish --allow-slow-types

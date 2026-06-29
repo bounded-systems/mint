@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.11 — 2026-06-29
+
+### Patch
+
+- split publish into approve (gate) + npm + jsr as independent parallel jobs — one approval unblocks all deploys, each target has its own job log and can be retried independently
+
 ## 0.4.10 — 2026-06-29
 
 ### Patch
