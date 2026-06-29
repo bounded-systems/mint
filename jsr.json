@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "exports": {
     ".": "./plan.mjs",
-    "./intents": "./intents.mjs"
+    "./intents": "./intents.mjs",
+    "./release": "./release.mjs"
   }
 }

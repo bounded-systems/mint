@@ -1,0 +1,81 @@
+# Reusable release-provenance workflow (workflow_call). A consuming repo calls
+# this on a `v*` tag push (the tag `mint release` cut) with a ~10-line caller;
+# no install, no published package. mint is checked out here and run against the
+# caller's manifest + CHANGELOG, so fixing the tool once + bumping the pin
+# propagates mint's release flow to every repo.
+#
+#   # .github/workflows/release.yml in the consumer:
+#   name: release
+#   on:
+#     push:
+#       tags: ["v*"]
+#   permissions:
+#     contents: write
+#     id-token: write
+#   jobs:
+#     release:
+#       uses: bounded-systems/mint/.github/workflows/release-provenance.yml@<sha>
+#       with:
+#         ref: <sha>
+#
+# It emits the deterministic in-toto release Statement (tag → version plan →
+# commit) with `mint attest`, keyless-signs it with cosign (the workflow's OIDC
+# identity — no key material), and attaches the Statement + its Sigstore bundle
+# to the caller's GitHub release. Verify with `cosign verify-blob` (the same
+# bundle @bounded-systems/verify consumes).
+name: release-provenance (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "mint ref to run from (tag/sha for reproducibility)."
+        type: string
+        default: main
+      node-version:
+        description: "Node version for the mint runtime."
+        type: string
+        default: "22"
+
+permissions:
+  contents: write   # create / upload to the caller's GitHub release
+  id-token: write   # OIDC — cosign keyless signing
+
+jobs:
+  release-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller (at the tag)
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Checkout mint
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: bounded-systems/mint
+          ref: ${{ inputs.ref }}
+          path: .mint
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Install mint deps
+        working-directory: .mint
+        run: npm ci --no-audit --no-fund
+      # Run mint against the CALLER's repo (cwd = caller workspace), so it reads
+      # the caller's package.json + CHANGELOG.md + git HEAD.
+      - name: Emit the in-toto release Statement
+        env:
+          MINT_REF: ${{ inputs.ref }}
+        run: node .mint/mint.mjs attest --out mint-release.intoto.json
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.7.0
+      - name: Keyless-sign the release Statement (cosign, OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: cosign sign-blob --yes --bundle mint-release.intoto.sigstore.json mint-release.intoto.json
+      - name: Attach provenance to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets="mint-release.intoto.json mint-release.intoto.sigstore.json"
+          # Create the release from the tag annotation, or upload to it if it exists.
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-from-tag $assets \
+            || gh release upload "$GITHUB_REF_NAME" $assets --clobber
