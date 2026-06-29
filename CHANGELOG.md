@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.12 — 2026-06-29
+
+### Patch
+
+- remove registry-url from npm job setup-node — injected NODE_AUTH_TOKEN conflicts with OIDC trusted publishing auth exchange
+
 ## 0.4.11 — 2026-06-29
 
 ### Patch
