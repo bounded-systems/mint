@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-06-29
+
+### Patch
+
+- fix publish logging — stream npm stage output so errors are visible in CI (was silently swallowed by set -e)
+
 ## 0.4.0 — 2026-06-29
 
 ### Minor
