@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.14 — 2026-06-29
+
+### Patch
+
+- revert _authToken strip — the empty NODE_AUTH_TOKEN reference in .npmrc is what triggers npm's OIDC exchange; stripping it causes ENEEDAUTH; trusted publisher config (no environment, publish allowed) is the real fix
+
 ## 0.4.13 — 2026-06-29
 
 ### Patch

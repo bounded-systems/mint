@@ -1,6 +1,6 @@
 {
   "name": "@bounded-systems/mint",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "description": "Deterministic versioning capability — intent files in, signed release out. A seam over semver: own the flow, delegate the arithmetic.",
   "type": "module",
   "bin": {

@@ -86,14 +86,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - run: npm ci --no-audit --no-fund
       - name: Publish to npm (OIDC trusted publishing — no token)
-        run: |
-          # actions/setup-node injects an empty _authToken into the npmrc it
-          # controls (NPM_CONFIG_USERCONFIG). That empty token blocks npm from
-          # falling through to its OIDC trusted-publishing exchange. Strip it
-          # so npm can request + exchange the GitHub Actions OIDC token instead.
-          config="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          grep -v '_authToken' "$config" > /tmp/npmrc && cp /tmp/npmrc "$config"
-          npm publish --access public --provenance
+        run: npm publish --access public --provenance
 
   jsr:
     needs: [release, approve]
