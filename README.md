@@ -106,6 +106,19 @@ mint ships from `release.yml` on each `v*` tag via **OIDC trusted publishing** �
 no `NPM_TOKEN`, no JSR token, ever. The package manifests are kept in lockstep by
 `mint version` (it bumps `package.json`, `package-lock.json`, **and** `jsr.json`).
 
+**npm uses staged publishing** — `npm stage publish` submits the package to a
+staging area rather than making it live immediately. A maintainer must approve it
+with 2FA before it appears on the registry:
+
+```sh
+npm stage approve <stage-id>   # CLI, 2FA required
+# or: npmjs.com → Staged Packages tab → Approve
+```
+
+The stage ID is surfaced in the GitHub Actions job summary after each release run.
+
+**JSR publishes immediately** on the same tag (no staging concept on JSR).
+
 JSR-readiness is verified the same way CI publishes:
 
 ```sh
@@ -154,7 +167,7 @@ releaseStatement({
 - [x] `mint release` — signed tag + in-toto release provenance, keyless-signed in CI (cosign/Sigstore; anchored-chain-shaped)
 - [ ] verbspec-typed CLI + MCP surface
 - [x] Reusable `workflow_call` Action (`version.yml` + `release-provenance.yml`)
-- [ ] Publish to npm + JSR
+- [x] Publish to npm (staged, human 2FA approval gate) + JSR
 
 Tracking: [bounded-systems/string-audit#43](https://github.com/bounded-systems/string-audit/issues/43).
 
