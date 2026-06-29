@@ -1,0 +1,25 @@
+jsr.json
+  s_b71734bb523c2c::t_77d1d9ab4b34ce 3
+CHANGELOG.md
+  s_b71734bb523c2c::t_77d1d9ab4b34ce 3-8
+package.json
+  s_b71734bb523c2c::t_77d1d9ab4b34ce 3
+package-lock.json
+  s_b71734bb523c2c::t_8d6d8e49e73637 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "0ec9b8a3e5d817ebdba26b9cfee491c7547e9d2e",
+  "prompts": {},
+  "sessions": {
+    "s_b71734bb523c2c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "40b46a92-78d6-45ac-b98e-faa965b241e6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
