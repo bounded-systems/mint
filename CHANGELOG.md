@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-06-29
+
+### Patch
+
+- release: JSR publish must not be blocked by the brand-new-npm-package step (continue-on-error)
+
 ## 0.3.0 — 2026-06-29
 
 ### Minor
