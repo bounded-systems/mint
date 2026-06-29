@@ -83,10 +83,14 @@ jobs:
           npm install -g npm@latest                # ensure npm 11.15.0+ for staged publishing
           echo "npm version: $(npm --version)"
           PKG=$(node -p "require('./package.json').name")
+          PKG_ENCODED=$(node -p "encodeURIComponent('$PKG')")
           # npm stage publish requires the package to already exist on the registry.
+          # Use curl (no auth) to check — npm view is unreliable here because
+          # actions/setup-node injects a NODE_AUTH_TOKEN into .npmrc that can
+          # cause the registry lookup to fail even for public packages.
           # On first publish, fall back to npm publish to seed it; all subsequent
           # releases go through the staged flow (human 2FA approval required).
-          if npm view "$PKG" version 2>/dev/null; then
+          if curl -sf "https://registry.npmjs.org/${PKG_ENCODED}" > /dev/null 2>&1; then
             echo "package exists — using npm stage publish"
             npm stage publish --access public --provenance 2>&1 | tee /tmp/stage-out.txt || true
           else

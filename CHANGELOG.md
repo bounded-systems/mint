@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.5 — 2026-06-29
+
+### Patch
+
+- fix registry existence check — use curl instead of `npm view` (NODE_AUTH_TOKEN in .npmrc was causing the lookup to fail, always falling through to first-publish path)
+
 ## 0.4.4 — 2026-06-29
 
 ### Patch
