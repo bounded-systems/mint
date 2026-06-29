@@ -40,7 +40,7 @@ jobs:
         id: pack
         run: echo "tgz=$(npm pack | tail -1)" >> "$GITHUB_OUTPUT"
       - name: Attest build provenance (SLSA)
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: ${{ steps.pack.outputs.tgz }}
       # Release provenance: the deterministic in-toto Statement binding this tag to
@@ -66,9 +66,11 @@ jobs:
             mint-release.intoto.json \
             mint-release.intoto.sigstore.json
 
-  publish:
+  stage:
     needs: release
     runs-on: ubuntu-latest
+    outputs:
+      stage_id: ${{ steps.stage.outputs.stage_id }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -76,7 +78,7 @@ jobs:
           node-version: "24"                       # npm 11.15.0+ required for staged publishing
           registry-url: "https://registry.npmjs.org"
       - run: npm ci --no-audit --no-fund
-      - name: Publish or stage on npm (OIDC trusted publishing — no token)
+      - name: Stage on npm (OIDC trusted publishing — no token)
         id: stage
         continue-on-error: true # JSR is the source of truth; npm failure must not block it
         run: |
@@ -100,30 +102,32 @@ jobs:
           STAGE_OUT=$(cat /tmp/stage-out.txt)
           STAGE_ID=$(echo "$STAGE_OUT" | grep -oE '[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}' | head -1 || true)
           echo "stage_id=${STAGE_ID}" >> "$GITHUB_OUTPUT"
-      - name: Surface approval instructions
+      - name: Publish to JSR (OIDC — no token)
+        run: npx jsr publish --allow-slow-types
+
+  npm-approve:
+    needs: stage
+    runs-on: ubuntu-latest
+    environment: npm-publish      # pauses here — required reviewer must approve in GitHub UI
+    steps:
+      - name: Approval instructions
         env:
-          STAGE_ID: ${{ steps.stage.outputs.stage_id }}
-          PKG: ${{ github.repository }}
+          STAGE_ID: ${{ needs.stage.outputs.stage_id }}
         run: |
           {
-            echo "## npm package staged — human approval required"
+            echo "## npm package staged — run this to publish"
             echo ""
-            echo "The package is in the staging area, **not yet live on the registry**."
-            echo "A maintainer must approve it with 2FA before it becomes publicly available."
+            echo "You approved the deployment gate. Now approve the staged package with 2FA:"
             echo ""
             if [ -n "$STAGE_ID" ]; then
               echo "**Stage ID:** \`${STAGE_ID}\`"
               echo ""
-              echo "**Approve via CLI (2FA required):**"
-              echo '```'
+              echo '```sh'
               echo "npm stage approve ${STAGE_ID}"
               echo '```'
             else
-              echo "> Could not parse stage ID from npm output."
-              echo "> Run \`npm stage list @bounded-systems/mint\` to find it."
+              echo "> Could not parse stage ID — run \`npm stage list @bounded-systems/mint\` to find it."
             fi
             echo ""
-            echo "**Or approve on npmjs.com:** open the [Staged Packages](https://www.npmjs.com/settings/~/packages/staged) tab."
+            echo "Or approve on npmjs.com → [Staged Packages](https://www.npmjs.com/settings/~/packages/staged)."
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Publish to JSR (OIDC — no token)
-        run: npx jsr publish --allow-slow-types

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6 — 2026-06-29
+
+### Patch
+
+- bump actions/attest-build-provenance to v4.1.1 (Node 24, clears deprecation warnings); add npm-publish GitHub Environment gate with required reviewer before surfacing the npm stage approve command
+
 ## 0.4.5 — 2026-06-29
 
 ### Patch
