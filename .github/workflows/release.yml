@@ -5,8 +5,18 @@ name: release
 #              in-toto release Statement (tag → version plan → commit), publish
 #              the GitHub release (notes from the tag annotation mint wrote) with
 #              the statement + its Sigstore bundle attached.
-#   publish  — publish to npm + JSR via OIDC trusted publishing. No tokens, ever:
-#              authentication is the workflow's OIDC identity (id-token: write).
+#   publish  — stage on npm via OIDC trusted publishing (no tokens, ever) and
+#              publish to JSR. The npm package is staged, not live: a maintainer
+#              must approve it with 2FA before it appears on the registry.
+#              See job summary for the stage ID + approval instructions.
+#
+# This workflow covers: npm (staged) + JSR + GitHub release.
+# Out of scope here — triggered separately on the same tag:
+#   Nix flakes    — flake consumers pin a sha; update PRs are opened by the
+#                   flake-update bot when the tag lands on the default branch.
+#   GHCR images   — OCI builds run in their own repo/workflow and reference the
+#                   published npm tarball or the GitHub release asset.
+#   Other deploys — bounded-systems infra workflows consume the GH release event.
 on:
   push:
     tags: ["v*"]
@@ -63,13 +73,43 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "24"                       # npm 11+ for OIDC trusted publishing
+          node-version: "24"                       # npm 11.15.0+ required for staged publishing
           registry-url: "https://registry.npmjs.org"
       - run: npm ci --no-audit --no-fund
-      - name: Publish to npm (OIDC trusted publishing — no token)
+      - name: Stage package on npm (OIDC trusted publishing — no token)
+        id: stage
         continue-on-error: true # brand-new npm pkg needs a trusted-publisher seed first; JSR is the source of truth, must not be blocked
         run: |
-          npm install -g npm@latest                # ensure trusted-publishing-capable npm
-          npm publish --access public --provenance
+          npm install -g npm@latest                # ensure npm 11.15.0+ for staged publishing
+          STAGE_OUT=$(npm stage publish --access public --provenance 2>&1)
+          echo "$STAGE_OUT"
+          # Extract the stage ID from npm output (format varies; fall back to empty string)
+          STAGE_ID=$(echo "$STAGE_OUT" | grep -oE '[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}' | head -1 || true)
+          echo "stage_id=${STAGE_ID}" >> "$GITHUB_OUTPUT"
+      - name: Surface approval instructions
+        env:
+          STAGE_ID: ${{ steps.stage.outputs.stage_id }}
+          PKG: ${{ github.repository }}
+        run: |
+          {
+            echo "## npm package staged — human approval required"
+            echo ""
+            echo "The package is in the staging area, **not yet live on the registry**."
+            echo "A maintainer must approve it with 2FA before it becomes publicly available."
+            echo ""
+            if [ -n "$STAGE_ID" ]; then
+              echo "**Stage ID:** \`${STAGE_ID}\`"
+              echo ""
+              echo "**Approve via CLI (2FA required):**"
+              echo '```'
+              echo "npm stage approve ${STAGE_ID}"
+              echo '```'
+            else
+              echo "> Could not parse stage ID from npm output."
+              echo "> Run \`npm stage list @bounded-systems/mint\` to find it."
+            fi
+            echo ""
+            echo "**Or approve on npmjs.com:** open the [Staged Packages](https://www.npmjs.com/settings/~/packages/staged) tab."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Publish to JSR (OIDC — no token)
         run: npx jsr publish --allow-slow-types
