@@ -19,5 +19,8 @@
   "dependencies": {
     "semver": "^7.6.0",
     "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
   }
 }
