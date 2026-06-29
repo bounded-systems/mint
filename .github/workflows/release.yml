@@ -81,8 +81,11 @@ jobs:
         continue-on-error: true # brand-new npm pkg needs a trusted-publisher seed first; JSR is the source of truth, must not be blocked
         run: |
           npm install -g npm@latest                # ensure npm 11.15.0+ for staged publishing
-          STAGE_OUT=$(npm stage publish --access public --provenance 2>&1)
-          echo "$STAGE_OUT"
+          echo "npm version: $(npm --version)"
+          # tee streams output live (visible in logs) while also capturing it;
+          # || true prevents set -e from silently swallowing the error + output.
+          npm stage publish --access public --provenance 2>&1 | tee /tmp/stage-out.txt || true
+          STAGE_OUT=$(cat /tmp/stage-out.txt)
           # Extract the stage ID from npm output (format varies; fall back to empty string)
           STAGE_ID=$(echo "$STAGE_OUT" | grep -oE '[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}' | head -1 || true)
           echo "stage_id=${STAGE_ID}" >> "$GITHUB_OUTPUT"
