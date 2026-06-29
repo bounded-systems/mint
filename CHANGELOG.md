@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.9 — 2026-06-29
+
+### Patch
+
+- replace npm staged publishing with direct npm publish gated behind the GitHub Environment approval — same human gate, no dependency on unfinished npm staging OIDC support
+
 ## 0.4.8 — 2026-06-29
 
 ### Patch
