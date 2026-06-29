@@ -67,6 +67,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - run: npm ci --no-audit --no-fund
       - name: Publish to npm (OIDC trusted publishing — no token)
+        continue-on-error: true # brand-new npm pkg needs a trusted-publisher seed first; JSR is the source of truth, must not be blocked
         run: |
           npm install -g npm@latest                # ensure trusted-publishing-capable npm
           npm publish --access public --provenance
