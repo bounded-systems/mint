@@ -106,16 +106,15 @@ mint ships from `release.yml` on each `v*` tag via **OIDC trusted publishing** �
 no `NPM_TOKEN`, no JSR token, ever. The package manifests are kept in lockstep by
 `mint version` (it bumps `package.json`, `package-lock.json`, **and** `jsr.json`).
 
-**npm uses staged publishing** — `npm stage publish` submits the package to a
-staging area rather than making it live immediately. A maintainer must approve it
-with 2FA before it appears on the registry:
+**npm uses a GitHub Environment gate** — the `npm-approve` job is blocked by the
+`npm-publish` environment, which requires a designated reviewer to approve in the
+GitHub Actions UI before `npm publish` runs. Approve at:
 
-```sh
-npm stage approve <stage-id>   # CLI, 2FA required
-# or: npmjs.com → Staged Packages tab → Approve
+```
+https://github.com/bounded-systems/mint/actions
 ```
 
-The stage ID is surfaced in the GitHub Actions job summary after each release run.
+Once approved, the package publishes immediately via OIDC trusted publishing (no token).
 
 **JSR publishes immediately** on the same tag (no staging concept on JSR).
 
@@ -137,6 +136,54 @@ JSR type-checker resolves mint's `node:` imports.
 > repo (Settings → "Link to a GitHub repository"). That GitHub link is what
 > authorizes the keyless OIDC publish; after it, every tagged release publishes
 > with no token.
+
+### Consumers: the 24h JSR/npm cooldown after a release
+
+Every fresh JSR/npm publish immediately hits Deno's
+[`minimumDependencyAge`](https://docs.deno.com/runtime/packages/supply_chain/)
+in any consumer running Deno 2.9+: since 2.9 it defaults to **24 hours** — Deno
+refuses to resolve a version published inside that window, full stop, no
+config needed to trigger it. It's a real supply-chain guard (malicious
+versions are usually caught/yanked within days), but it applies to first-party
+`@bounded-systems/*` releases exactly the same as to a random third party.
+
+Concretely: `baobab@0.2.0` published, and every downstream consumer's CI
+(e.g. a `check-contrast.yml` caller) hard-failed for the next 24h trying to
+resolve it — not a flake, a guaranteed wait baked into every release
+([bounded-systems/mint#11](https://github.com/bounded-systems/mint/issues/11)).
+For one package that's a wait; for a coordinated rollout of several
+interdependent `@bounded-systems/*` packages in one sitting, it ripples —
+every consumer of every package in the batch eats the same 24h, and chains of
+dependencies compound it.
+
+**The fix does NOT live in a consumer's `deno.json`.** An earlier version of
+this doc claimed a `minimumDependencyAge.exclude` list there would work —
+that was wrong, and only looked right because it was tested against Deno
+2.8.3 (which doesn't enforce the 24h default at all; the default only started
+in 2.9). Verified against the real `2.9.1` binary: `deno.json` is never even
+read when `deno run`'s entrypoint is a bare `jsr:...` specifier — config-file
+discovery only applies in normal "project mode." Planting invalid JSON in a
+`deno.json` and confirming Deno never complained is what exposed this.
+
+**What actually works:** the `--minimum-dependency-age` CLI flag on the
+invocation itself. That means the fix has to live wherever the `deno run`
+command is composed — for a reusable GitHub Actions workflow like
+`check-contrast.yml`, that's an input on the workflow, not something a caller
+can override from its own repo
+([bounded-systems/baobab#7](https://github.com/bounded-systems/baobab/pull/7)
+adds `minimum-dependency-age`, defaulting to `"0"`, since the only thing that
+workflow ever resolves from the network is `@bounded-systems/baobab` itself —
+a first-party package the caller already trust-bounds via its own version
+range input, so the age gate adds no real protection there). Any other
+reusable workflow or script that shells out to `deno run jsr:...`/`npm:...`
+directly needs the same treatment: an explicit `--minimum-dependency-age`
+(or `--minimum-dependency-age=0` if every dependency it touches is
+first-party) on the command, not a config file a caller drops in.
+
+This still doesn't scale past a handful of hand-fixed workflows — #11 is the
+open ask for mint to own generating this consistently across every
+`@bounded-systems/*` reusable workflow, rather than fixing each one by hand
+as it's hit.
 
 ## Library
 
@@ -167,7 +214,7 @@ releaseStatement({
 - [x] `mint release` — signed tag + in-toto release provenance, keyless-signed in CI (cosign/Sigstore; anchored-chain-shaped)
 - [ ] verbspec-typed CLI + MCP surface
 - [x] Reusable `workflow_call` Action (`version.yml` + `release-provenance.yml`)
-- [x] Publish to npm (staged, human 2FA approval gate) + JSR
+- [x] Publish to npm (GitHub Environment approval gate) + JSR
 
 Tracking: [bounded-systems/string-audit#43](https://github.com/bounded-systems/string-audit/issues/43).
 

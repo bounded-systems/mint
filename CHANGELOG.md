@@ -1,5 +1,95 @@
 # Changelog
 
+## 0.4.15 — 2026-06-29
+
+### Patch
+
+- add repository field to package.json — required by npm provenance verification to match the GitHub repo URL in the OIDC claims
+
+## 0.4.14 — 2026-06-29
+
+### Patch
+
+- revert _authToken strip — the empty NODE_AUTH_TOKEN reference in .npmrc is what triggers npm's OIDC exchange; stripping it causes ENEEDAUTH; trusted publisher config (no environment, publish allowed) is the real fix
+
+## 0.4.13 — 2026-06-29
+
+### Patch
+
+- fix npm OIDC auth — restore registry-url and strip the injected empty _authToken before publishing so npm can fall through to its OIDC trusted-publishing exchange
+
+## 0.4.12 — 2026-06-29
+
+### Patch
+
+- remove registry-url from npm job setup-node — injected NODE_AUTH_TOKEN conflicts with OIDC trusted publishing auth exchange
+
+## 0.4.11 — 2026-06-29
+
+### Patch
+
+- split publish into approve (gate) + npm + jsr as independent parallel jobs — one approval unblocks all deploys, each target has its own job log and can be retried independently
+
+## 0.4.10 — 2026-06-29
+
+### Patch
+
+- unify npm + JSR behind a single publish job gated by the npm-publish GitHub Environment — one approval deploys to all registries
+
+## 0.4.9 — 2026-06-29
+
+### Patch
+
+- replace npm staged publishing with direct npm publish gated behind the GitHub Environment approval — same human gate, no dependency on unfinished npm staging OIDC support
+
+## 0.4.8 — 2026-06-29
+
+### Patch
+
+- fix npm stage publish OIDC scope — move npm stage publish into the npm-approve job (environment: npm-publish) so the OIDC token carries the environment claim required by the trusted publisher
+
+## 0.4.7 — 2026-06-29
+
+### Patch
+
+- retry staged npm publish — trusted publisher now has stage action + environment scoped to npm-publish
+
+## 0.4.6 — 2026-06-29
+
+### Patch
+
+- bump actions/attest-build-provenance to v4.1.1 (Node 24, clears deprecation warnings); add npm-publish GitHub Environment gate with required reviewer before surfacing the npm stage approve command
+
+## 0.4.5 — 2026-06-29
+
+### Patch
+
+- fix registry existence check — use curl instead of `npm view` (NODE_AUTH_TOKEN in .npmrc was causing the lookup to fail, always falling through to first-publish path)
+
+## 0.4.4 — 2026-06-29
+
+### Patch
+
+- first staged npm release — package now seeded, all future releases go through `npm stage publish` with human 2FA approval
+
+## 0.4.3 — 2026-06-29
+
+### Patch
+
+- seed npm first publish — detect new package and fall back to `npm publish` before staging is available
+
+## 0.4.2 — 2026-06-29
+
+### Patch
+
+- retry staged npm publish — trusted publisher updated to allow staging
+
+## 0.4.1 — 2026-06-29
+
+### Patch
+
+- fix publish logging — stream npm stage output so errors are visible in CI (was silently swallowed by set -e)
+
 ## 0.4.0 — 2026-06-29
 
 ### Minor

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "_comment": "Declarative record of the npm trusted publisher configuration for @bounded-systems/mint. Apply manually at https://www.npmjs.com/package/@bounded-systems/mint/access until npm exposes a public API for this.",
+  "provider": "github-actions",
+  "organization": "bounded-systems",
+  "repository": "mint",
+  "workflow": "release.yml",
+  "environment": null,
+  "permissions": ["npm publish"]
+}
