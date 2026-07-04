@@ -156,29 +156,34 @@ interdependent `@bounded-systems/*` packages in one sitting, it ripples —
 every consumer of every package in the batch eats the same 24h, and chains of
 dependencies compound it.
 
-**Workaround (consumer-side, until mint grows tooling for this):** a
-consumer's own `deno.json` can exempt specific packages via the object form —
-Deno's `exclude` list takes exact `jsr:@scope/name` entries only, no
-scope-level wildcard:
+**The fix does NOT live in a consumer's `deno.json`.** An earlier version of
+this doc claimed a `minimumDependencyAge.exclude` list there would work —
+that was wrong, and only looked right because it was tested against Deno
+2.8.3 (which doesn't enforce the 24h default at all; the default only started
+in 2.9). Verified against the real `2.9.1` binary: `deno.json` is never even
+read when `deno run`'s entrypoint is a bare `jsr:...` specifier — config-file
+discovery only applies in normal "project mode." Planting invalid JSON in a
+`deno.json` and confirming Deno never complained is what exposed this.
 
-```json
-{
-  "minimumDependencyAge": {
-    "age": "P1D",
-    "exclude": ["jsr:@bounded-systems/baobab", "jsr:@bounded-systems/brand"]
-  }
-}
-```
+**What actually works:** the `--minimum-dependency-age` CLI flag on the
+invocation itself. That means the fix has to live wherever the `deno run`
+command is composed — for a reusable GitHub Actions workflow like
+`check-contrast.yml`, that's an input on the workflow, not something a caller
+can override from its own repo
+([bounded-systems/baobab#7](https://github.com/bounded-systems/baobab/pull/7)
+adds `minimum-dependency-age`, defaulting to `"0"`, since the only thing that
+workflow ever resolves from the network is `@bounded-systems/baobab` itself —
+a first-party package the caller already trust-bounds via its own version
+range input, so the age gate adds no real protection there). Any other
+reusable workflow or script that shells out to `deno run jsr:...`/`npm:...`
+directly needs the same treatment: an explicit `--minimum-dependency-age`
+(or `--minimum-dependency-age=0` if every dependency it touches is
+first-party) on the command, not a config file a caller drops in.
 
-Exempting `@bounded-systems/*` packages this way is safe for a consumer
-that's *also* bounded-systems — the supply-chain risk the default guards
-against doesn't apply to your own org's releases. What doesn't scale: this
-list has to be hand-copied into every consumer repo and re-synced whenever a
-new package joins the scope (36 as of this writing). #11 proposes
-`adoption.mjs` grow this — it already drops the `release-provenance.yml` /
-`version.yml` callers into every publishable repo, so generating/refreshing
-this `deno.json` exclude fragment from `api.jsr.io/scopes/bounded-systems/packages`
-alongside them is the natural next step, not yet built.
+This still doesn't scale past a handful of hand-fixed workflows — #11 is the
+open ask for mint to own generating this consistently across every
+`@bounded-systems/*` reusable workflow, rather than fixing each one by hand
+as it's hit.
 
 ## Library
 
