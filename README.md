@@ -137,6 +137,49 @@ JSR type-checker resolves mint's `node:` imports.
 > authorizes the keyless OIDC publish; after it, every tagged release publishes
 > with no token.
 
+### Consumers: the 24h JSR/npm cooldown after a release
+
+Every fresh JSR/npm publish immediately hits Deno's
+[`minimumDependencyAge`](https://docs.deno.com/runtime/packages/supply_chain/)
+in any consumer running Deno 2.9+: since 2.9 it defaults to **24 hours** — Deno
+refuses to resolve a version published inside that window, full stop, no
+config needed to trigger it. It's a real supply-chain guard (malicious
+versions are usually caught/yanked within days), but it applies to first-party
+`@bounded-systems/*` releases exactly the same as to a random third party.
+
+Concretely: `baobab@0.2.0` published, and every downstream consumer's CI
+(e.g. a `check-contrast.yml` caller) hard-failed for the next 24h trying to
+resolve it — not a flake, a guaranteed wait baked into every release
+([bounded-systems/mint#11](https://github.com/bounded-systems/mint/issues/11)).
+For one package that's a wait; for a coordinated rollout of several
+interdependent `@bounded-systems/*` packages in one sitting, it ripples —
+every consumer of every package in the batch eats the same 24h, and chains of
+dependencies compound it.
+
+**Workaround (consumer-side, until mint grows tooling for this):** a
+consumer's own `deno.json` can exempt specific packages via the object form —
+Deno's `exclude` list takes exact `jsr:@scope/name` entries only, no
+scope-level wildcard:
+
+```json
+{
+  "minimumDependencyAge": {
+    "age": "P1D",
+    "exclude": ["jsr:@bounded-systems/baobab", "jsr:@bounded-systems/brand"]
+  }
+}
+```
+
+Exempting `@bounded-systems/*` packages this way is safe for a consumer
+that's *also* bounded-systems — the supply-chain risk the default guards
+against doesn't apply to your own org's releases. What doesn't scale: this
+list has to be hand-copied into every consumer repo and re-synced whenever a
+new package joins the scope (36 as of this writing). #11 proposes
+`adoption.mjs` grow this — it already drops the `release-provenance.yml` /
+`version.yml` callers into every publishable repo, so generating/refreshing
+this `deno.json` exclude fragment from `api.jsr.io/scopes/bounded-systems/packages`
+alongside them is the natural next step, not yet built.
+
 ## Library
 
 ```js
