@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 — 2026-07-05
+
+### Minor
+
+- read + bump `deno.json` (not just `package.json`/`jsr.json`) — unblocks every Deno/JSR package in the org from adopting mint (fixes #13; unblocks gh-project-room#47)
+
+### Patch
+
+- docs: document the minimumDependencyAge 24h JSR/npm cooldown for consumers and its batch-rollout ripple (#11)
+
 ## 0.4.15 — 2026-06-29
 
 ### Patch
