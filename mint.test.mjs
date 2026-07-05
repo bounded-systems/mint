@@ -177,3 +177,37 @@ test("DSSE pre-authentication encoding wraps the canonical statement", () => {
   assert.ok(pae.startsWith(`DSSEv1 ${DSSE_PAYLOAD_TYPE.length} ${DSSE_PAYLOAD_TYPE} ${Buffer.byteLength(payload)} `));
   assert.ok(pae.endsWith(payload));
 });
+
+// ── CLI manifest handling: mint reads/bumps deno.json, not just package.json (#13)
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const MINT = fileURLToPath(new URL("./mint.mjs", import.meta.url));
+
+function bumpIn(manifestName) {
+  const d = mkdtempSync(join(tmpdir(), "mint-cli-"));
+  try {
+    writeFileSync(
+      join(d, manifestName),
+      JSON.stringify({ name: "@x/y", version: "0.1.0", exports: "./m.ts" }, null, 2) + "\n",
+    );
+    mkdirSync(join(d, ".release"));
+    writeFileSync(join(d, ".release", "i.md"), "---\nbump: minor\n---\nx\n");
+    execFileSync("node", [MINT, "version"], { cwd: d, stdio: "pipe" });
+    return JSON.parse(readFileSync(join(d, manifestName), "utf8")).version;
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+}
+
+test("mint version bumps a deno.json-only repo (#13)", () => {
+  assert.equal(bumpIn("deno.json"), "0.2.0");
+});
+
+test("mint version still bumps a jsr.json / package.json repo", () => {
+  assert.equal(bumpIn("jsr.json"), "0.2.0");
+  assert.equal(bumpIn("package.json"), "0.2.0");
+});

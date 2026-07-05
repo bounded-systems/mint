@@ -34,10 +34,23 @@ async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
 }
 
+// The version lives in whichever manifest a repo uses: deno.json (Deno),
+// jsr.json (JSR-from-npm), or package.json (npm). A repo may carry several kept
+// in lockstep. Detect the first present one that declares a version.
+const MANIFESTS = ["deno.json", "jsr.json", "package.json"];
+
 async function currentVersion() {
-  const pkg = await readJson("package.json");
-  if (!pkg.version) throw new Error("package.json has no version field");
-  return pkg.version;
+  for (const path of MANIFESTS) {
+    try {
+      const m = await readJson(path);
+      if (m.version) return m.version;
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+    }
+  }
+  throw new Error(
+    `no manifest with a version field (looked for: ${MANIFESTS.join(", ")})`,
+  );
 }
 
 async function cmdPlan() {
@@ -63,23 +76,30 @@ async function cmdVersion() {
     return;
   }
 
-  // Bump the manifest (+ lockfile if present), preserving 2-space JSON.
-  const pkg = await readJson("package.json");
-  pkg.version = p.nextVersion;
-  await writeFile("package.json", JSON.stringify(pkg, null, 2) + "\n");
+  // Bump every manifest present (deno.json / jsr.json / package.json) in
+  // lockstep, preserving 2-space JSON.
+  const bumped = [];
+  for (const path of MANIFESTS) {
+    try {
+      const m = await readJson(path);
+      m.version = p.nextVersion;
+      await writeFile(path, JSON.stringify(m, null, 2) + "\n");
+      bumped.push(path);
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+    }
+  }
+  if (bumped.length === 0) {
+    throw new Error(
+      `no manifest to bump (looked for: ${MANIFESTS.join(", ")})`,
+    );
+  }
+  // Keep an npm lockfile in lockstep if present.
   try {
     const lock = await readJson("package-lock.json");
     lock.version = p.nextVersion;
     if (lock.packages?.[""]) lock.packages[""].version = p.nextVersion;
     await writeFile("package-lock.json", JSON.stringify(lock, null, 2) + "\n");
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-  }
-  // Keep jsr.json in lockstep (JSR has its own manifest version).
-  try {
-    const jsr = await readJson("jsr.json");
-    jsr.version = p.nextVersion;
-    await writeFile("jsr.json", JSON.stringify(jsr, null, 2) + "\n");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
@@ -95,7 +115,7 @@ async function cmdVersion() {
   // Consume the intents.
   for (const i of intents) if (i.file) await unlink(i.file);
 
-  console.log(`mint: ${p.currentVersion} → ${p.nextVersion} (${p.bump}). Updated package.json + CHANGELOG.md, consumed ${intents.length} intent(s).`);
+  console.log(`mint: ${p.currentVersion} → ${p.nextVersion} (${p.bump}). Updated ${bumped.join(" + ")} + CHANGELOG.md, consumed ${intents.length} intent(s).`);
   console.log(`Next: commit, then \`mint release\` to cut the tag + emit release provenance.`);
 }
 
@@ -122,9 +142,7 @@ function ciBuilder() {
 // (reads package.json + CHANGELOG + git HEAD + CI env); delegates the pure shape
 // to release.mjs. Throws with a CLI-friendly message on a missing changelog entry.
 async function gatherStatement() {
-  const pkg = await readJson("package.json");
-  const version = pkg.version;
-  if (!version) throw new Error("package.json has no version");
+  const version = await currentVersion();
   const tag = `v${version}`;
 
   let changelog = "";
