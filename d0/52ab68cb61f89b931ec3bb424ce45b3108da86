@@ -1,0 +1,26 @@
+.release/deno-json-support.md
+  s_70508ca017cb29::t_4339aa007c0937 1-4
+mint.mjs
+  s_70508ca017cb29::t_5c2359c6ff0d35 145
+  s_70508ca017cb29::t_95ac66a10c0621 37-41,43-53
+  s_70508ca017cb29::t_a2b2ab66212a50 79-97
+  s_70508ca017cb29::t_886c8d57df8e83 118
+mint.test.mjs
+  s_70508ca017cb29::t_eabdefe335ba9b 180-213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "d052ab68cb61f89b931ec3bb424ce45b3108da86",
+  "prompts": {},
+  "sessions": {
+    "s_70508ca017cb29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d283f13f-34c8-429b-8cb1-b020e645c0e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
