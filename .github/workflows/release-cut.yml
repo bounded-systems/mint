@@ -105,33 +105,44 @@ permissions:
   contents: write # create + push the tag
 
 jobs:
-  cut:
+  # SECURITY GUARD — a separate job, on purpose, and it runs before `cut` can
+  # fetch anything.
+  #
+  # This workflow holds `contents: write` and reads the version it will TAG out
+  # of the CALLER's manifest. Nothing in workflow_call stops a consumer wiring
+  # it to `pull_request`; if one did, a fork PR would control deno.json, so an
+  # attacker could set any version and have it tagged with write permissions.
+  # The header documents workflow_dispatch, but documentation is not
+  # enforcement — the gap infra#135 and ci-workflows#8 already demonstrated.
+  #
+  # WHY TWO MECHANISMS FOR ONE RULE. The allow-list appears twice: as this job's
+  # runtime `case`, and as the static `if:` on `cut` below. That is deliberate
+  # and neither is redundant:
+  #
+  #   - the `if:` is STATIC, so CodeQL can see it. Its rule "checkout of
+  #     untrusted code in a non-privileged context" cannot evaluate a shell
+  #     conditional, so a runtime-only guard leaves the alert open forever.
+  #   - the `if:` ALONE is not acceptable, because a false job-level `if:`
+  #     SKIPS the job. A consumer who wired this to `pull_request` would get a
+  #     green skipped check instead of an error — a control that reads green
+  #     while gating nothing, which is the exact shape this workflow exists to
+  #     remove. This job fails LOUDLY instead, and `cut` needs it.
+  #
+  # Net behaviour on an untrusted event: this job goes red with an explanation,
+  # and `cut` never runs. Loud, and statically visible.
+  #
+  # The two lists MUST agree. mint.test.mjs asserts they do, so drift between
+  # them fails the suite rather than silently widening one of them.
+  #
+  # ALLOW-LIST, not deny-list — an unrecognised event is refused rather than
+  # permitted, so a future GitHub event type cannot silently become an entry
+  # point. `push` is safe to include: push events only fire for refs already in
+  # the repository, which required write access to create. `pull_request` and
+  # `pull_request_target` are exactly what this stops.
+  guard:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.resolve.outputs.version }}
-      tag: ${{ steps.resolve.outputs.tag }}
-      cut: ${{ steps.tag.outputs.cut || 'false' }}
     steps:
-      # SECURITY GUARD — runs BEFORE any checkout, deliberately.
-      #
-      # This workflow holds `contents: write` and reads the version it will tag
-      # out of the CALLER's manifest. Nothing in workflow_call stops a consumer
-      # wiring it to `pull_request`, and if they did, a fork PR would control
-      # deno.json — so an attacker could set any version and have it tagged with
-      # write permissions. The header documents workflow_dispatch, but
-      # documentation is not enforcement; that gap is the entire subject of the
-      # work this workflow comes from (infra#135, ci-workflows#8).
-      #
-      # Flagged by CodeQL as "checkout of untrusted code in a non-privileged
-      # context" on the first revision of this file, where the caller checkout
-      # was step 1. Correct call: refuse the event before fetching anything.
-      #
-      # ALLOW-LIST, not deny-list — an unrecognised event is refused rather than
-      # permitted, so a future GitHub event type cannot silently become an entry
-      # point. `push` is safe to include: push events only fire for refs already
-      # in the repository, which requires write access. `pull_request` and
-      # `pull_request_target` are exactly what this exists to stop.
-      - name: Guard — refuse untrusted trigger events
+      - name: Refuse untrusted trigger events
         env:
           EVENT: ${{ github.event_name }}
         run: |
@@ -146,6 +157,17 @@ jobs:
               exit 1 ;;
           esac
 
+  cut:
+    needs: guard
+    # Static twin of the guard job's allow-list — see the comment above. Keep in
+    # sync with it; mint.test.mjs fails if they diverge.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      cut: ${{ steps.tag.outputs.cut || 'false' }}
+    steps:
       # Full history + tags: the "tag already exists" guard cannot be trusted on
       # a shallow clone with no tags — it would pass vacuously and re-cut a
       # published version.

@@ -211,3 +211,35 @@ test("mint version still bumps a jsr.json / package.json repo", () => {
   assert.equal(bumpIn("jsr.json"), "0.2.0");
   assert.equal(bumpIn("package.json"), "0.2.0");
 });
+
+// --- release-cut.yml: the two halves of one allow-list must agree -----------
+//
+// release-cut.yml states its trusted-trigger allow-list TWICE: once as the
+// `guard` job's runtime `case`, once as the static `if:` on `cut`. Both are
+// needed — the `if:` is what CodeQL can see, the `case` is what fails LOUDLY
+// instead of skipping silently — but two copies of one rule drift, and drift
+// here means one of them silently permits an event the other refuses.
+//
+// So the file is the fixture: parse both lists out of it and require they
+// match. Widening one without the other fails the suite.
+test("release-cut.yml: guard case and cut if: allow the same events", () => {
+  const src = readFileSync(new URL("./.github/workflows/release-cut.yml", import.meta.url), "utf8");
+
+  const caseArm = src.match(/^\s*(workflow_dispatch[^)]*)\)\s*echo\s+"trigger/m);
+  assert.ok(caseArm, "could not find the guard job's case arm — did the guard get renamed or removed?");
+  const fromCase = new Set(caseArm[1].split("|").map((s) => s.trim()).filter(Boolean));
+
+  const ifLine = src.match(/^\s*if:\s*(github\.event_name\s*==.*)$/m);
+  assert.ok(ifLine, "could not find the static if: on the cut job — CodeQL's half of the guard is missing");
+  const fromIf = new Set([...ifLine[1].matchAll(/github\.event_name\s*==\s*'([^']+)'/g)].map((m) => m[1]));
+
+  assert.deepEqual(
+    [...fromCase].sort(),
+    [...fromIf].sort(),
+    "release-cut.yml's runtime allow-list and its static if: disagree — one would permit an event the other refuses",
+  );
+  assert.ok(fromCase.size > 0, "allow-list is empty, which would refuse every trigger");
+  for (const denied of ["pull_request", "pull_request_target"]) {
+    assert.ok(!fromCase.has(denied), `${denied} must never be trusted: a fork PR would control the version being tagged`);
+  }
+});
