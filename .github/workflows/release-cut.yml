@@ -112,6 +112,40 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       cut: ${{ steps.tag.outputs.cut || 'false' }}
     steps:
+      # SECURITY GUARD — runs BEFORE any checkout, deliberately.
+      #
+      # This workflow holds `contents: write` and reads the version it will tag
+      # out of the CALLER's manifest. Nothing in workflow_call stops a consumer
+      # wiring it to `pull_request`, and if they did, a fork PR would control
+      # deno.json — so an attacker could set any version and have it tagged with
+      # write permissions. The header documents workflow_dispatch, but
+      # documentation is not enforcement; that gap is the entire subject of the
+      # work this workflow comes from (infra#135, ci-workflows#8).
+      #
+      # Flagged by CodeQL as "checkout of untrusted code in a non-privileged
+      # context" on the first revision of this file, where the caller checkout
+      # was step 1. Correct call: refuse the event before fetching anything.
+      #
+      # ALLOW-LIST, not deny-list — an unrecognised event is refused rather than
+      # permitted, so a future GitHub event type cannot silently become an entry
+      # point. `push` is safe to include: push events only fire for refs already
+      # in the repository, which requires write access. `pull_request` and
+      # `pull_request_target` are exactly what this exists to stop.
+      - name: Guard — refuse untrusted trigger events
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            workflow_dispatch | push) echo "trigger '$EVENT' is trusted" ;;
+            *)
+              echo "::error::release-cut refuses trigger event '$EVENT'." \
+                   "It holds contents:write and reads the version to tag from the caller's" \
+                   "manifest, so an untrusted event could tag an attacker-chosen version." \
+                   "Call it from workflow_dispatch (see this workflow's header)."
+              exit 1 ;;
+          esac
+
       # Full history + tags: the "tag already exists" guard cannot be trusted on
       # a shallow clone with no tags — it would pass vacuously and re-cut a
       # published version.
