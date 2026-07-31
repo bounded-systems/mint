@@ -1,0 +1,263 @@
+# Reusable release-CUT workflow (workflow_call). Cuts the `v<version>` tag in CI
+# under the workflow's own identity, so the one step of the release flow that
+# still needed a human's laptop no longer does.
+#
+# WHY THIS EXISTS (mint#22): every other step is already CI + OIDC — `mint plan`
+# in version.yml, `mint attest` + cosign keyless signing in release-provenance.yml,
+# and the registry publish. Only the tag cut ran locally, which meant the SUBJECT
+# of the in-toto Statement was created by whoever happened to run the CLI. A tag
+# cut by a pinned workflow is attested by `job_workflow_ref` — reviewed,
+# deterministic code on protected main — which is program attestation rather than
+# "we trust the person who ran it".
+#
+#   # .github/workflows/release-cut.yml in the consumer:
+#   name: release-cut
+#   on:
+#     workflow_dispatch:
+#       inputs:
+#         expect-version: { description: "Version you expect to cut", type: string }
+#         dry-run:        { description: "Verify only; cut nothing", type: boolean, default: true }
+#   permissions:
+#     contents: write
+#   jobs:
+#     cut:
+#       uses: bounded-systems/mint/.github/workflows/release-cut.yml@<sha>
+#       with:
+#         ref: <sha>
+#         expect-version: ${{ inputs.expect-version }}
+#         dry-run: ${{ inputs.dry-run }}
+#     # ... then chain publish + provenance, see the WARNING below.
+#
+# ############################################################################
+# # WARNING — READ BEFORE WIRING THIS UP. A TAG PUSHED HERE TRIGGERS NOTHING. #
+# ############################################################################
+#
+# GitHub does not create workflow runs from events caused by GITHUB_TOKEN (the
+# only exceptions are workflow_dispatch and repository_dispatch). Consumers'
+# release machinery conventionally fires on the tag:
+#
+#     on: { push: { tags: ["v*"] } }
+#
+# Those workflows WILL NOT RUN when this job pushes the tag. A consumer that
+# wires this up and assumes otherwise gets a tag, a green run, no publish, and
+# no provenance — a control that looks like it worked and did nothing, which is
+# the exact failure shape mint#22 and ci-workflows#8 were opened about.
+#
+# So the consumer MUST chain the downstream work as dependent jobs in the SAME
+# run, keying off this workflow's `tag` / `version` outputs:
+#
+#     jobs:
+#       cut:
+#         uses: bounded-systems/mint/.github/workflows/release-cut.yml@<sha>
+#       publish:
+#         needs: cut
+#         if: needs.cut.outputs.cut == 'true'
+#         permissions: { contents: read, id-token: write }
+#         # ... checkout ${{ needs.cut.outputs.tag }} and publish
+#       provenance:
+#         needs: cut
+#         if: needs.cut.outputs.cut == 'true'
+#         permissions: { contents: write, id-token: write }
+#         uses: bounded-systems/mint/.github/workflows/release-provenance.yml@<sha>
+#
+# The tag-triggered workflows stay valid for a laptop-cut `mint release`. Both
+# paths reach the same end state; they just fire differently. Document which one
+# a given repo uses, or that ambiguity becomes the next stale record.
+#
+# DRY-RUN DEFAULTS TO TRUE, deliberately. A registry publish is irreversible —
+# JSR versions are immutable — so the safe mode is the default and cutting is
+# the explicit act. Verify first, then dispatch again with dry-run: false.
+name: release-cut (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "mint ref to run from (tag/sha for reproducibility)."
+        type: string
+        default: main
+      node-version:
+        description: "Node version for the mint runtime."
+        type: string
+        default: "22"
+      expect-version:
+        description: >-
+          Version the caller expects to cut. When set, the job fails if the
+          manifest disagrees — a cheap guard against dispatching the wrong thing.
+        type: string
+        default: ""
+      dry-run:
+        description: "Run every guard and cut nothing. Defaults to true."
+        type: boolean
+        default: true
+    outputs:
+      version:
+        description: "Version resolved from the caller's manifest."
+        value: ${{ jobs.cut.outputs.version }}
+      tag:
+        description: "The tag (v<version>) — cut if dry-run was false."
+        value: ${{ jobs.cut.outputs.tag }}
+      cut:
+        description: "'true' only if a tag was actually created and pushed."
+        value: ${{ jobs.cut.outputs.cut }}
+
+permissions:
+  contents: write # create + push the tag
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      cut: ${{ steps.tag.outputs.cut || 'false' }}
+    steps:
+      # SECURITY GUARD — runs BEFORE any checkout, deliberately.
+      #
+      # This workflow holds `contents: write` and reads the version it will tag
+      # out of the CALLER's manifest. Nothing in workflow_call stops a consumer
+      # wiring it to `pull_request`, and if they did, a fork PR would control
+      # deno.json — so an attacker could set any version and have it tagged with
+      # write permissions. The header documents workflow_dispatch, but
+      # documentation is not enforcement; that gap is the entire subject of the
+      # work this workflow comes from (infra#135, ci-workflows#8).
+      #
+      # Flagged by CodeQL as "checkout of untrusted code in a non-privileged
+      # context" on the first revision of this file, where the caller checkout
+      # was step 1. Correct call: refuse the event before fetching anything.
+      #
+      # ALLOW-LIST, not deny-list — an unrecognised event is refused rather than
+      # permitted, so a future GitHub event type cannot silently become an entry
+      # point. `push` is safe to include: push events only fire for refs already
+      # in the repository, which requires write access. `pull_request` and
+      # `pull_request_target` are exactly what this exists to stop.
+      - name: Guard — refuse untrusted trigger events
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            workflow_dispatch | push) echo "trigger '$EVENT' is trusted" ;;
+            *)
+              echo "::error::release-cut refuses trigger event '$EVENT'." \
+                   "It holds contents:write and reads the version to tag from the caller's" \
+                   "manifest, so an untrusted event could tag an attacker-chosen version." \
+                   "Call it from workflow_dispatch (see this workflow's header)."
+              exit 1 ;;
+          esac
+
+      # Full history + tags: the "tag already exists" guard cannot be trusted on
+      # a shallow clone with no tags — it would pass vacuously and re-cut a
+      # published version.
+      - name: Checkout caller
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Checkout mint
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: bounded-systems/mint
+          ref: ${{ inputs.ref }}
+          path: .mint
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install mint deps
+        working-directory: .mint
+        run: npm ci --no-audit --no-fund
+
+      - name: Resolve version from the caller's manifest
+        id: resolve
+        env:
+          EXPECT: ${{ inputs.expect-version }}
+        run: |
+          set -euo pipefail
+          version="$(node -e '
+            const fs = require("node:fs");
+            for (const p of ["deno.json", "jsr.json", "package.json"]) {
+              try { const v = JSON.parse(fs.readFileSync(p, "utf8")).version;
+                    if (v) { console.log(v); process.exit(0); } } catch {}
+            }
+            console.error("no version in deno.json / jsr.json / package.json");
+            process.exit(1);
+          ')"
+          if [ -n "$EXPECT" ] && [ "$EXPECT" != "$version" ]; then
+            echo "::error::expect-version is '$EXPECT' but the manifest says '$version'." \
+                 "Refusing — dispatching the wrong version is the mistake this input exists to catch."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version"    >> "$GITHUB_OUTPUT"
+          echo "resolved $version (tag v$version)"
+
+      # Fail closed on an existing tag. A published version is immutable
+      # downstream, so re-cutting it is never the right recovery.
+      - name: Guard — tag must not already exist
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
+             || [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "::error::$TAG already exists. A published version must never be re-cut;" \
+                 "bump with \`mint version\` and dispatch again."
+            exit 1
+          fi
+          echo "$TAG is free"
+
+      # `mint version` must already have been applied AND merged. An unconsumed
+      # intent means the manifest version is behind what the intents resolve to,
+      # so cutting here would tag the wrong version.
+      - name: Guard — no unconsumed release intents
+        run: |
+          set -euo pipefail
+          out="$(node .mint/mint.mjs plan)"
+          echo "$out"
+          if ! printf '%s' "$out" | grep -q "nothing to release"; then
+            echo "::error::.release/ still holds intents — \`mint version\` has not been applied and merged." \
+                 "Cutting now would tag a version the intents say is already superseded."
+            exit 1
+          fi
+
+      # Proves the CHANGELOG entry for this version exists and the statement is
+      # derivable. `mint attest` is fail-closed on a missing entry, so this is
+      # the same check release-provenance.yml will do later — done here, before
+      # anything is published, rather than after.
+      - name: Guard — release statement is derivable
+        run: |
+          set -euo pipefail
+          node .mint/mint.mjs attest --out /tmp/release-cut.intoto.json
+          node -e '
+            const s = require("/tmp/release-cut.intoto.json");
+            console.log("statement subject:", s.subject[0].name, "@", s.subject[0].digest.gitCommit);
+          '
+
+      - name: Cut and push the tag
+        id: tag
+        if: ${{ !inputs.dry-run }}
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Annotated, not signed: a workflow holds no signing key. The release
+          # Statement that release-provenance.yml keyless-signs is the stronger
+          # attestation, and it binds this exact tag to this exact commit.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+          echo "cut=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::Cut and pushed $TAG. Tag-triggered workflows will NOT fire for this push" \
+               "(GITHUB_TOKEN); the caller must chain publish + provenance as dependent jobs."
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry-run }}
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          echo "::notice::Dry run — every guard passed and $TAG was NOT cut." \
+               "Dispatch again with dry-run: false to release."
