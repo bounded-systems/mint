@@ -100,6 +100,37 @@ jobs:
 `adoption.mjs --write` drops both this caller and the `version.yml` caller into
 every publishable repo — the path off hand-tagging.
 
+#### Shipping extra assets (binaries) on the same release
+
+The release is created as a **draft** and published only once its assets are
+attached. A published release is immutable, so anything that attaches *after*
+the release goes public fails with `422: Cannot upload assets to an immutable
+release` — which is how drift-gate v0.2.0 shipped with no binaries.
+
+So build the assets in a job of the *same* workflow and hand the artifact to
+`assets-artifact`; the release job attaches them with the provenance and
+publishes once. A separate tag-triggered workflow racing for the same release is
+the thing to avoid — it is unordered by construction.
+
+```yaml
+permissions: { contents: write, id-token: write, actions: read } # actions: read — artifact download
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      # ... compile into dist/ ...
+      - uses: actions/upload-artifact@<sha>
+        with: { name: release-binaries, path: dist/* }
+  release:
+    needs: binaries
+    uses: bounded-systems/mint/.github/workflows/release-provenance.yml@<sha>
+    with: { ref: <sha>, assets-artifact: release-binaries }
+```
+
+If a repo must keep a separate attach workflow, pass `finalize: false` so this
+job leaves the draft for that workflow to publish — but that only moves the
+finish line, it does not order the two workflows.
+
 ## Publish (npm + JSR)
 
 mint ships from `release.yml` on each `v*` tag via **OIDC trusted publishing** —

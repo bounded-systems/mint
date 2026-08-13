@@ -25,6 +25,41 @@
 # bundle @bounded-systems/verify consumes).
 name: release-provenance (reusable)
 
+# ── Why the release is created as a DRAFT (#19) ──────────────────────────────
+# A *published* GitHub release is immutable once the repo has immutable releases
+# enabled, so anything that attaches assets after the release is published gets
+#
+#     HTTP 422: Cannot upload assets to an immutable release.
+#
+# That is exactly what happened to drift-gate v0.2.0: this workflow published the
+# release, and the repo's separate `binaries.yml` — racing it on the same tag —
+# could no longer attach the compiled binaries. Publishing is therefore the LAST
+# thing this workflow does: it creates the release as a draft (drafts stay
+# mutable), attaches everything, and only then finalizes.
+#
+# Two ways for a caller that ships extra assets to stay correct:
+#
+#   1. PREFERRED — one writer. Build the assets in a job of the caller's own
+#      release workflow, upload them as an artifact, and hand the artifact name
+#      to `assets-artifact`. This job attaches them alongside the provenance and
+#      publishes ONCE, so there is no second workflow racing for the release.
+#      The caller must add `actions: read` to its `permissions:` block (a called
+#      workflow only ever gets the intersection with the caller's) — without it
+#      the artifact download cannot see the run:
+#
+#        permissions: { contents: write, id-token: write, actions: read }
+#        jobs:
+#          binaries: { ... }          # uploads artifact "release-binaries"
+#          release:
+#            needs: binaries
+#            uses: bounded-systems/mint/.github/workflows/release-provenance.yml@<sha>
+#            with: { ref: <sha>, assets-artifact: release-binaries }
+#
+#   2. Keep a separate attach workflow, and pass `finalize: false` so this job
+#      leaves the release a draft for that workflow to publish when it is done.
+#      Note this only moves the finish line: two workflows triggered by the same
+#      tag are still unordered, so the one that publishes can still beat the
+#      other's upload. Prefer (1).
 on:
   workflow_call:
     inputs:
@@ -36,10 +71,24 @@ on:
         description: "Node version for the mint runtime."
         type: string
         default: "22"
+      assets-artifact:
+        description: >-
+          Optional name of a workflow artifact from an earlier job in the SAME
+          run; its files are attached to the release alongside the provenance.
+          Requires `actions: read` on the caller. Empty = provenance only.
+        type: string
+        default: ""
+      finalize:
+        description: >-
+          Publish the release (leave draft) once assets are attached. Pass false
+          only if a separate workflow attaches more assets and publishes itself.
+        type: boolean
+        default: true
 
 permissions:
   contents: write   # create / upload to the caller's GitHub release
   id-token: write   # OIDC — cosign keyless signing
+  actions: read     # `gh run download` — only needed with assets-artifact
 
 jobs:
   release-provenance:
@@ -71,11 +120,45 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: cosign sign-blob --yes --bundle mint-release.intoto.sigstore.json mint-release.intoto.json
+      # Same run as the caller (a reusable workflow shares its run id), so the
+      # artifact an earlier `needs:` job uploaded is fetchable with the gh CLI
+      # that is already in use here — no extra action to pin.
+      - name: Collect caller-supplied release assets
+        if: inputs.assets-artifact != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .mint-assets
+          # Fail loudly: a silent miss here ships a release MISSING the binaries
+          # it was asked to attach, which is the failure #19 is about.
+          gh run download "$GITHUB_RUN_ID" --name "${{ inputs.assets-artifact }}" --dir .mint-assets
+          if [ -z "$(ls -A .mint-assets)" ]; then
+            echo "release-provenance: artifact '${{ inputs.assets-artifact }}' is empty" >&2
+            exit 1
+          fi
+          ls -lh .mint-assets
+
       - name: Attach provenance to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          assets="mint-release.intoto.json mint-release.intoto.sigstore.json"
-          # Create the release from the tag annotation, or upload to it if it exists.
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-from-tag $assets \
-            || gh release upload "$GITHUB_REF_NAME" $assets --clobber
+          set -euo pipefail
+          assets=(mint-release.intoto.json mint-release.intoto.sigstore.json)
+          # nullglob: an absent/empty dir must expand to nothing, not to a
+          # literal `.mint-assets/*` that gh would try to open as a file.
+          shopt -s nullglob
+          assets+=(.mint-assets/*)
+          shopt -u nullglob
+          # DRAFT — see the header. A published release is immutable, so creating
+          # it published here is what locks out every later attach.
+          gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes-from-tag "${assets[@]}" \
+            || gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+
+      # Publishing LAST is the fix: everything is attached by now, so the release
+      # is immutable only once it is complete.
+      - name: Finalize (publish) the release
+        if: inputs.finalize
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
