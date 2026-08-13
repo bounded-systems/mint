@@ -243,3 +243,55 @@ test("release-cut.yml: guard case and cut if: allow the same events", () => {
     assert.ok(!fromCase.has(denied), `${denied} must never be trusted: a fork PR would control the version being tagged`);
   }
 });
+
+// --- release-provenance.yml: never publish a release before it is complete ---
+//
+// #19: a published GitHub release is immutable, so whoever publishes first locks
+// everyone else out — drift-gate v0.2.0 shipped with NO binaries because this
+// workflow published the release before the repo's binaries job could attach
+// them (`HTTP 422: Cannot upload assets to an immutable release`).
+//
+// The fix is an ordering, and an ordering is exactly what a later edit can undo
+// without noticing. So the file is the fixture: creation must be a draft, and
+// publishing must come after the attach.
+test("release-provenance.yml: creates a draft and publishes only after attaching", () => {
+  const src = readFileSync(new URL("./.github/workflows/release-provenance.yml", import.meta.url), "utf8");
+
+  const create = src.match(/^\s*gh release create .*$/m);
+  assert.ok(create, "no `gh release create` — did the attach step get renamed or removed?");
+  assert.match(
+    create[0],
+    /--draft\b/,
+    "`gh release create` must pass --draft: a published release is immutable, so creating it published " +
+      "is what makes every later asset upload fail with 422 (#19)",
+  );
+
+  const attachAt = src.indexOf("gh release create");
+  const publishAt = src.indexOf("--draft=false");
+  assert.ok(publishAt !== -1, "nothing ever publishes the draft — the release would stay invisible");
+  assert.ok(
+    publishAt > attachAt,
+    "the release is published before its assets are attached — that is the #19 ordering bug, reintroduced",
+  );
+});
+
+// The artifact hand-off is the one-writer path out of #19: assets are attached by
+// this job rather than by a second workflow racing it for the same release. It
+// needs `actions: read` to see the run, and a called workflow only ever gets the
+// intersection with its caller — so the permission has to be declared here too.
+test("release-provenance.yml: assets-artifact input is wired and permitted", () => {
+  const src = readFileSync(new URL("./.github/workflows/release-provenance.yml", import.meta.url), "utf8");
+
+  assert.match(src, /^\s{6}assets-artifact:$/m, "assets-artifact input is missing");
+  assert.match(src, /^\s{6}finalize:$/m, "finalize input is missing");
+  assert.match(
+    src,
+    /^\s*actions:\s*read\b/m,
+    "`actions: read` is missing — `gh run download` cannot fetch the caller's artifact without it",
+  );
+  assert.match(
+    src,
+    /gh run download "\$GITHUB_RUN_ID"/,
+    "the artifact must come from the CALLER's run — a reusable workflow shares its run id",
+  );
+});
