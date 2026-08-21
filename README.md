@@ -251,4 +251,4 @@ Tracking: [bounded-systems/string-audit#43](https://github.com/bounded-systems/s
 
 ## License
 
-PolyForm-Noncommercial-1.0.0
+MIT
