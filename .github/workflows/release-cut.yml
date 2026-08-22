@@ -270,7 +270,28 @@ jobs:
           # attestation, and it binds this exact tag to this exact commit.
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "$TAG"
+          # THE ANNOTATION IS THE CHANGELOG ENTRY (#42). Both release workflows
+          # publish with `--notes-from-tag`, so whatever goes in here IS the
+          # release notes. This wrote "$TAG", which shipped mint v0.7.0 with a
+          # one-line body where `mint release` from a checkout would have given
+          # the full entry — the two paths are meant to reach the same end state.
+          #
+          # The text comes from the Statement the guard step above already
+          # derived, so the annotation is byte-identical to the entry that
+          # Statement attests (predicate.plan.changelog, digested in
+          # predicate.plan.digest.sha256) rather than a second rendering that
+          # could drift from it.
+          #
+          # -F, not -m: the entry is multi-line and contains backticks and
+          # parentheses, which no amount of shell quoting should have to survive.
+          node -e '
+            const { readFileSync, writeFileSync } = require("node:fs");
+            const s = JSON.parse(readFileSync("/tmp/release-cut.intoto.json", "utf8"));
+            const notes = s.predicate.plan.changelog;
+            if (!notes) { console.error("release-cut: statement carries no changelog entry"); process.exit(1); }
+            writeFileSync("/tmp/release-cut.notes", notes);
+          '
+          git tag -a "$TAG" -F /tmp/release-cut.notes
           git push origin "$TAG"
           echo "cut=true" >> "$GITHUB_OUTPUT"
           echo "::notice::Cut and pushed $TAG. Tag-triggered workflows will NOT fire for this push" \
