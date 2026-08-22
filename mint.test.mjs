@@ -389,3 +389,41 @@ test("release-provenance.yml: assets-artifact input is wired and permitted", () 
     "the artifact must come from the CALLER's run — a reusable workflow shares its run id",
   );
 });
+
+// --- release-cut.yml: the tag annotation IS the release notes ---------------
+//
+// #42. Both release workflows publish with `--notes-from-tag`, so whatever this
+// step writes as the annotation becomes the GitHub release body. It wrote the
+// tag name, which shipped v0.7.0 with a one-line body where `mint release` from
+// a checkout writes the whole changelog entry (cmdRelease: `git tag -a $tag -m
+// entry`). The dispatched path and the laptop path are supposed to reach the
+// same end state; that one is the difference between a release record and a
+// string.
+//
+// A dry run cannot catch this: the annotation is written only in the step gated
+// on `!inputs.dry-run`, so every guard passes while the one wrong line never
+// runs. Hence a fixture.
+test("release-cut.yml: the tag annotation is the changelog, not the tag name", () => {
+  const src = readFileSync(new URL("./.github/workflows/release-cut.yml", import.meta.url), "utf8");
+  const step = src.slice(src.indexOf("- name: Cut and push the tag"));
+  const body = step.slice(0, step.indexOf("- name: Dry-run summary"));
+
+  assert.doesNotMatch(
+    body,
+    /git tag -a "\$TAG" -m "\$TAG"/,
+    'the annotation must not be the tag name — that is the #42 defect verbatim',
+  );
+  assert.match(
+    body,
+    /git tag -a "\$TAG" -F /,
+    "annotate from a file: the changelog entry is multi-line and full of backticks",
+  );
+  // The notes must come from the Statement the guard step already derived, so
+  // the annotation is byte-identical to the entry that Statement attests rather
+  // than a second rendering free to drift from it.
+  assert.match(
+    body,
+    /predicate\.plan\.changelog/,
+    "the notes must be read out of the release Statement's attested changelog entry",
+  );
+});
