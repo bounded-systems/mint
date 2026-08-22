@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1 — 2026-08-22
+
+### Patch
+
+- `release-cut.yml` writes the changelog entry as the tag annotation instead of the tag name, so a CI-cut release gets the same GitHub release notes a laptop cut does. Both release workflows publish with `--notes-from-tag`, so the annotation *is* the notes; the text is read out of the release Statement the cut already derives, making it byte-identical to the entry that Statement attests.
+
 ## 0.7.0 — 2026-08-22
 
 ### Minor
