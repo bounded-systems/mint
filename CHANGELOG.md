@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 — 2026-08-22
+
+### Minor
+
+- Relicensed to MIT (org license tiering, #34). The manifests changed in the 0.6.0 bump, but 0.6.0 was manifest-only and was never tagged or published — 0.7.0 is the first release that actually ships under MIT. Everything up to and including 0.5.0 remains under PolyForm-Noncommercial-1.0.0.
+- `release-provenance.yml` takes a `tag` input, so it can be chained after `release-cut.yml`. It defaults to the triggering ref, leaving the `on: push: tags` path every consumer uses today byte-identical; a chained caller passes the cut tag rather than getting the branch.
+- mint adopts its own `release-cut`: a new `cut` workflow dispatches the tag cut in CI and chains `release.yml` as a dependent job, so a release no longer needs a laptop. `release.yml` gains a `workflow_call` trigger and a `tag` input; its `push: tags` trigger is unchanged, so a locally-cut release still works.
+- release-provenance: create the GitHub release as a draft and publish it only once assets are attached, so a separate binaries job can no longer hit `422: Cannot upload assets to an immutable release`; adds `assets-artifact` (attach a caller artifact from the same run) and `finalize` inputs
+
 ## 0.5.0 — 2026-07-05
 
 ### Minor

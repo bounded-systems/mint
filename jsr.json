@@ -1,6 +1,6 @@
 {
   "name": "@bounded-systems/mint",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "license": "MIT",
   "exports": {
     ".": "./plan.mjs",
@@ -15,7 +15,8 @@
       "mint.mjs",
       "README.md",
       "CHANGELOG.md",
-      "jsr.json", "LICENSE"
+      "jsr.json",
+      "LICENSE"
     ]
   }
 }
