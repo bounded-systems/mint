@@ -1,0 +1,63 @@
+name: cut
+
+# The release, dispatched — mint using its own release-cut on itself (#39).
+#
+# Every other step of the flow was already CI: `mint plan` in version.yml, the
+# SLSA + cosign attestations and both registry publishes in release.yml. Only the
+# tag cut ran on someone's laptop, which is what release-cut.yml was built to fix
+# (#22) — and mint had not adopted it, so the tool that removes the manual step
+# could not be shipped without the manual step.
+#
+# WHY THE DOWNSTREAM WORK IS CHAINED RATHER THAN TRIGGERED. GitHub creates no
+# workflow runs from events caused by GITHUB_TOKEN. release.yml's `push: tags`
+# trigger will NOT fire for the tag this cuts, so relying on it would produce a
+# tag, a green run, and no release — the failure release-cut.yml's own header
+# warns about at length. release.yml is `workflow_call`-able for exactly this,
+# and is passed the cut tag; its tag-push trigger stays valid for a laptop cut.
+#
+# DRY RUN DEFAULTS TO TRUE. A registry publish is irreversible — JSR versions are
+# immutable — so verifying is the default and releasing is the explicit act.
+# Dispatch once to see every guard pass, then again with dry-run unchecked.
+#
+# The npm-publish environment gate inside release.yml is unchanged: a maintainer
+# still approves before anything reaches a registry. This removes the laptop, not
+# the human.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expect-version:
+        description: "Version you expect to cut (e.g. 0.7.0). Fails if the manifest disagrees."
+        type: string
+        required: false
+      dry-run:
+        description: "Verify only — run every guard and cut nothing."
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  cut:
+    permissions:
+      contents: write # create + push the tag
+    uses: ./.github/workflows/release-cut.yml
+    with:
+      # Self-hosted call: run the mint runtime from the commit being released.
+      ref: ${{ github.sha }}
+      expect-version: ${{ inputs.expect-version }}
+      dry-run: ${{ inputs.dry-run }}
+
+  release:
+    needs: cut
+    if: needs.cut.outputs.cut == 'true'
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # OIDC — SLSA attestation, cosign keyless, npm/JSR publishing
+      attestations: write
+    uses: ./.github/workflows/release.yml
+    with:
+      # Load-bearing: without this every job below would run against the branch
+      # this was dispatched from, not the tag `cut` just created.
+      tag: ${{ needs.cut.outputs.tag }}

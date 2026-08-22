@@ -275,6 +275,63 @@ test("release-provenance.yml: creates a draft and publishes only after attaching
   );
 });
 
+// --- the CI-cut path: chained, and pinned to the tag it cut ------------------
+//
+// #39: release-cut.yml was built so a release stops needing someone's laptop
+// (#22), and mint had not adopted it — the tool could not ship without the
+// manual step it exists to remove. cut.yml adopts it here.
+//
+// Two properties, and both are the kind a later edit undoes by accident:
+//
+//   1. The downstream work must be CHAINED, not triggered. GitHub creates no
+//      runs from GITHUB_TOKEN events, so release.yml's `push: tags` will not
+//      fire for a tag release-cut pushed. A `cut` job with nothing depending on
+//      it produces a tag and no release — green, and empty.
+//   2. release.yml must be pinned to the cut tag. Chained, the run's event is
+//      workflow_dispatch on a branch, so an unpinned checkout tests, packs,
+//      attests and publishes MAIN under a version tag's name.
+test("cut.yml: chains the release and passes the cut tag", () => {
+  const src = readFileSync(new URL("./.github/workflows/cut.yml", import.meta.url), "utf8");
+
+  assert.match(src, /uses:\s*\.\/\.github\/workflows\/release-cut\.yml/, "cut.yml does not call release-cut");
+  assert.match(
+    src,
+    /uses:\s*\.\/\.github\/workflows\/release\.yml/,
+    "nothing chains release.yml — a tag pushed by GITHUB_TOKEN triggers no workflow, so the release would never happen",
+  );
+  assert.match(src, /needs:\s*cut/, "the release job must depend on the cut");
+  assert.match(
+    src,
+    /tag:\s*\$\{\{\s*needs\.cut\.outputs\.tag\s*\}\}/,
+    "the cut tag is not passed to release.yml — chained, it would release the branch this was dispatched from",
+  );
+  assert.match(
+    src,
+    /if:\s*needs\.cut\.outputs\.cut\s*==\s*'true'/,
+    "the release must be gated on an actual cut, or a dry run would publish",
+  );
+});
+
+test("release.yml: callable, and every checkout is pinned to the tag", () => {
+  const src = readFileSync(new URL("./.github/workflows/release.yml", import.meta.url), "utf8");
+
+  assert.match(src, /^\s{2}workflow_call:$/m, "release.yml is not callable — cut.yml cannot chain it");
+  assert.match(src, /^\s{6}tag:$/m, "the `tag` input is missing");
+
+  // Every checkout of the caller's own repo must name the tag. One unpinned
+  // checkout is enough to publish the branch.
+  const checkouts = src.split("\n").filter((l) => l.includes("actions/checkout@")).length;
+  const pinned = (src.match(/ref:\s*\$\{\{\s*inputs\.tag\s*\|\|\s*github\.ref_name\s*\}\}/g) || []).length;
+  assert.equal(
+    pinned,
+    checkouts,
+    `${checkouts} checkout(s) but ${pinned} pinned to the tag — an unpinned one releases the dispatch branch`,
+  );
+
+  const shellRefs = src.split("\n").filter((l) => !l.trim().startsWith("#") && l.includes("$GITHUB_REF_NAME"));
+  assert.deepEqual(shellRefs, [], "a $GITHUB_REF_NAME expansion survives — on a chained run that is the branch");
+});
+
 // --- release-provenance.yml: the tag comes from the input, not the event ------
 //
 // #37: release-cut.yml's header prescribes chaining this workflow as a dependent

@@ -22,6 +22,19 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Callable so the CI-cut path can chain this as a dependent job. A tag pushed
+  # by GITHUB_TOKEN triggers nothing, so `cut.yml` cannot rely on the trigger
+  # above — it calls this workflow directly and passes the tag it just cut (#39).
+  workflow_call:
+    inputs:
+      tag:
+        description: >-
+          The v<version> tag to release. Defaults to the triggering ref, which is
+          correct for the tag-push path. A chained caller MUST pass it: that run's
+          event is workflow_dispatch on a BRANCH, so github.ref_name is the branch
+          and every job below would test, pack, attest and release main instead.
+        type: string
+        default: ""
 
 permissions:
   contents: write      # create the GitHub release
@@ -31,8 +44,12 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
@@ -63,7 +80,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-from-tag \
+          gh release create "$TAG" --title "$TAG" --notes-from-tag \
             "${{ steps.pack.outputs.tgz }}" \
             mint-release.intoto.json \
             mint-release.intoto.sigstore.json
@@ -80,6 +97,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
@@ -93,6 +112,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
