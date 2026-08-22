@@ -447,8 +447,20 @@ test("release-cut.yml: the tag annotation is the changelog, not the tag name", (
 // the signed record are not the same bytes.
 test("mint release: the tag annotation keeps the changelog headings (#45)", () => {
   const d = mkdtempSync(join(tmpdir(), "mint-tag-"));
+  // ISOLATE THE MACHINE'S GIT CONFIG. Without this the test reads whatever the
+  // developer happens to have set, and the first draft passed here while failing
+  // in CI for a reason that had nothing to do with what it was testing: this
+  // machine sets commit.gpgsign, a bare runner does not, and `git config --get`
+  // EXITS 1 on an unset key — so `mint release` died with
+  // `Command failed: git config --get commit.gpgsign`.
+  //
+  // That was a real bug in the laptop path, not a test artifact, and it was
+  // invisible precisely because the verdict depended on ambient state. Pinning
+  // both config files to /dev/null makes this test say the same thing
+  // everywhere, and covers the unsigned path deterministically.
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
   try {
-    const git = (...args) => execFileSync("git", args, { cwd: d, stdio: "pipe" }).toString();
+    const git = (...args) => execFileSync("git", args, { cwd: d, stdio: "pipe", env }).toString();
     git("init", "-q", ".");
     git("config", "user.email", "t@example.invalid");
     git("config", "user.name", "t");
@@ -461,7 +473,7 @@ test("mint release: the tag annotation keeps the changelog headings (#45)", () =
     );
     git("add", "-A");
     git("commit", "-q", "-m", "seed");
-    execFileSync("node", [MINT, "release", "--no-push", "--no-attest"], { cwd: d, stdio: "pipe" });
+    execFileSync("node", [MINT, "release", "--no-push", "--no-attest"], { cwd: d, stdio: "pipe", env });
 
     const annotation = git("tag", "-l", "--format=%(contents)", "v0.2.0");
     assert.match(annotation, /^## 0\.2\.0 — 2026-01-01$/m, "the version heading must survive");
