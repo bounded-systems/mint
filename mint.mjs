@@ -214,7 +214,12 @@ async function cmdRelease() {
   if (tagExists) { console.error(`mint release: tag ${tag} already exists.`); process.exit(1); }
   if (dirty) { console.error("mint release: working tree not clean — commit the release first."); process.exit(1); }
 
-  git("tag", signedTag ? "-s" : "-a", tag, "-m", entry);
+  // --cleanup=verbatim: git's default for a tag message is --cleanup=strip, which
+  // deletes every line starting with `#` — so the entry's `## <version>` and
+  // `### <bump>` headings were being dropped from every tag mint has ever cut
+  // (#45), and with them the only marker of which changes were minor and which
+  // were patches.
+  git("tag", signedTag ? "-s" : "-a", tag, "--cleanup=verbatim", "-m", entry);
   console.log(`mint: created ${signedTag ? "signed" : "annotated (unsigned — no git signing key configured)"} tag ${tag}`);
   if (!noAttest) {
     await writeFile(attestPath, stmtText);

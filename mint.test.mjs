@@ -415,7 +415,10 @@ test("release-cut.yml: the tag annotation is the changelog, not the tag name", (
   );
   assert.match(
     body,
-    /git tag -a "\$TAG" -F /,
+    // Flag-order tolerant: #45 inserted --cleanup=verbatim between the tag and
+    // -F, and this assertion is about annotating FROM A FILE, not about argv
+    // order.
+    /git tag -a "\$TAG"[^\n]* -F /,
     "annotate from a file: the changelog entry is multi-line and full of backticks",
   );
   // The notes must come from the Statement the guard step already derived, so
@@ -425,5 +428,59 @@ test("release-cut.yml: the tag annotation is the changelog, not the tag name", (
     body,
     /predicate\.plan\.changelog/,
     "the notes must be read out of the release Statement's attested changelog entry",
+  );
+});
+
+// --- the tag annotation must keep the changelog's markdown headings ---------
+//
+// #45, and a correction to #43. git tag defaults to --cleanup=strip, which
+// deletes every line starting with `#` — and a mint entry opens with
+// `## <version>` and `### <bump>`. So the annotation was a strict SUBSET of the
+// changelog entry, not the byte-identical copy #43 claimed: every tag mint has
+// ever cut lost its headings, laptop cuts included (v0.5.0's annotation is
+// bullets-only).
+//
+// Cosmetic for a single-section entry. Destructive for a multi-section one: the
+// `### Minor` / `### Patch` split disappears and the bullets merge into one
+// undifferentiated list. It also breaks the property #43 was reaching for — the
+// Statement digests predicate.plan.changelog, so a subset means the notes and
+// the signed record are not the same bytes.
+test("mint release: the tag annotation keeps the changelog headings (#45)", () => {
+  const d = mkdtempSync(join(tmpdir(), "mint-tag-"));
+  try {
+    const git = (...args) => execFileSync("git", args, { cwd: d, stdio: "pipe" }).toString();
+    git("init", "-q", ".");
+    git("config", "user.email", "t@example.invalid");
+    git("config", "user.name", "t");
+    writeFileSync(join(d, "package.json"), JSON.stringify({ name: "@x/y", version: "0.2.0" }, null, 2) + "\n");
+    // Two sections on purpose: this is the case where stripping the headings
+    // loses information rather than merely looking untidy.
+    writeFileSync(
+      join(d, "CHANGELOG.md"),
+      "# Changelog\n\n## 0.2.0 — 2026-01-01\n\n### Minor\n\n- a minor thing\n\n### Patch\n\n- a patch thing\n",
+    );
+    git("add", "-A");
+    git("commit", "-q", "-m", "seed");
+    execFileSync("node", [MINT, "release", "--no-push", "--no-attest"], { cwd: d, stdio: "pipe" });
+
+    const annotation = git("tag", "-l", "--format=%(contents)", "v0.2.0");
+    assert.match(annotation, /^## 0\.2\.0 — 2026-01-01$/m, "the version heading must survive");
+    assert.match(annotation, /^### Minor$/m, "the Minor heading must survive");
+    assert.match(annotation, /^### Patch$/m, "the Patch heading must survive");
+    assert.match(annotation, /- a minor thing/);
+    assert.match(annotation, /- a patch thing/);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// The CI path cuts its own tag, so it needs the same flag — and there is no
+// cheap end-to-end for it here, since the step runs on a runner.
+test("release-cut.yml: the tag is annotated with --cleanup=verbatim (#45)", () => {
+  const src = readFileSync(new URL("./.github/workflows/release-cut.yml", import.meta.url), "utf8");
+  assert.match(
+    src,
+    /git tag -a "\$TAG" --cleanup=verbatim -F /,
+    "without --cleanup=verbatim git strips the entry's `##` and `###` heading lines",
   );
 });
