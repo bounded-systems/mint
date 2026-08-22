@@ -284,6 +284,14 @@ jobs:
           #
           # -F, not -m: the entry is multi-line and contains backticks and
           # parentheses, which no amount of shell quoting should have to survive.
+          #
+          # --cleanup=verbatim is what makes "byte-identical" true (#45). git's
+          # DEFAULT for a tag message is --cleanup=strip, which deletes every line
+          # beginning with `#` — and a mint entry opens with `## <version>` and
+          # `### <bump>`. Without this the annotation is a strict SUBSET of the
+          # attested changelog: the headings vanish, and a multi-section entry
+          # renders as one undifferentiated bullet list with nothing saying which
+          # changes were minor and which were patches.
           node -e '
             const { readFileSync, writeFileSync } = require("node:fs");
             const s = JSON.parse(readFileSync("/tmp/release-cut.intoto.json", "utf8"));
@@ -291,7 +299,7 @@ jobs:
             if (!notes) { console.error("release-cut: statement carries no changelog entry"); process.exit(1); }
             writeFileSync("/tmp/release-cut.notes", notes);
           '
-          git tag -a "$TAG" -F /tmp/release-cut.notes
+          git tag -a "$TAG" --cleanup=verbatim -F /tmp/release-cut.notes
           git push origin "$TAG"
           echo "cut=true" >> "$GITHUB_OUTPUT"
           echo "::notice::Cut and pushed $TAG. Tag-triggered workflows will NOT fire for this push" \

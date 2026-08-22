@@ -17,6 +17,10 @@ import { releaseStatement, statementDigest } from "./release.mjs";
 
 const git = (...a) => execFileSync("git", a, { encoding: "utf8" }).trim();
 const gitOk = (...a) => { try { execFileSync("git", a, { stdio: "ignore" }); return true; } catch { return false; } };
+// `git config --get <key>` EXITS 1 when the key is simply unset, which is the
+// normal state on a default git install — so reading one through `git()` throws
+// rather than returning "". Every optional-config read goes through this.
+const gitVal = (...a) => { try { return execFileSync("git", a, { encoding: "utf8" }).trim(); } catch { return ""; } };
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -193,7 +197,12 @@ async function cmdRelease() {
   const attestPath = flag("--attest") ?? `${tag}.intoto.json`;
   const stmtText = JSON.stringify(stmt, null, 2) + "\n";
   const signedStatement = stmt.predicate.builder != null; // CI ⇒ keyless-signed downstream
-  const signedTag = git("config", "--get", "commit.gpgsign") === "true" || gitOk("config", "--get", "user.signingkey");
+  // gitVal, not git: an unset commit.gpgsign is not an error, it is the default.
+  // Reading it through `git()` made `mint release` die with
+  // `Command failed: git config --get commit.gpgsign` on any machine that had
+  // not opted into commit signing — i.e. the documented laptop path was broken
+  // for anyone whose git config did not happen to set it (#45).
+  const signedTag = gitVal("config", "--get", "commit.gpgsign") === "true" || gitOk("config", "--get", "user.signingkey");
   const tagExists = gitOk("rev-parse", tag);
   const dirty = git("status", "--porcelain");
 
@@ -214,7 +223,12 @@ async function cmdRelease() {
   if (tagExists) { console.error(`mint release: tag ${tag} already exists.`); process.exit(1); }
   if (dirty) { console.error("mint release: working tree not clean — commit the release first."); process.exit(1); }
 
-  git("tag", signedTag ? "-s" : "-a", tag, "-m", entry);
+  // --cleanup=verbatim: git's default for a tag message is --cleanup=strip, which
+  // deletes every line starting with `#` — so the entry's `## <version>` and
+  // `### <bump>` headings were being dropped from every tag mint has ever cut
+  // (#45), and with them the only marker of which changes were minor and which
+  // were patches.
+  git("tag", signedTag ? "-s" : "-a", tag, "--cleanup=verbatim", "-m", entry);
   console.log(`mint: created ${signedTag ? "signed" : "annotated (unsigned — no git signing key configured)"} tag ${tag}`);
   if (!noAttest) {
     await writeFile(attestPath, stmtText);
