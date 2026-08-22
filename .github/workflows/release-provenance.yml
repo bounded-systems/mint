@@ -84,6 +84,20 @@ on:
           only if a separate workflow attaches more assets and publishes itself.
         type: boolean
         default: true
+      tag:
+        description: >-
+          The `v<version>` tag to attest and attach the release to. Defaults to
+          the triggering ref, which is correct for `on: push: tags` — the path
+          every consumer uses today.
+
+          A caller CHAINING this after release-cut.yml must pass the cut tag.
+          That run's event is workflow_dispatch on a BRANCH, so `github.ref_name`
+          is the branch: without this input the job checks out main, attests
+          main's HEAD, and creates a draft release literally named `main` while
+          the real tag gets nothing. release-cut.yml's header prescribes exactly
+          that chaining, so the two workflows did not compose (#37).
+        type: string
+        default: ""
 
 permissions:
   contents: write   # create / upload to the caller's GitHub release
@@ -93,9 +107,16 @@ permissions:
 jobs:
   release-provenance:
     runs-on: ubuntu-latest
+    env:
+      # One source for the tag: the explicit input when chained, the triggering
+      # ref when fired by a tag push. Everything below reads $TAG rather than
+      # $GITHUB_REF_NAME, so the two paths cannot diverge.
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Checkout caller (at the tag)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - name: Checkout mint
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
@@ -152,8 +173,8 @@ jobs:
           shopt -u nullglob
           # DRAFT — see the header. A published release is immutable, so creating
           # it published here is what locks out every later attach.
-          gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --notes-from-tag "${assets[@]}" \
-            || gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          gh release create "$TAG" --draft --title "$TAG" --notes-from-tag "${assets[@]}" \
+            || gh release upload "$TAG" "${assets[@]}" --clobber
 
       # Publishing LAST is the fix: everything is attached by now, so the release
       # is immutable only once it is complete.
@@ -161,4 +182,4 @@ jobs:
         if: inputs.finalize
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false
+        run: gh release edit "$TAG" --draft=false

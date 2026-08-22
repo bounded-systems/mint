@@ -275,6 +275,43 @@ test("release-provenance.yml: creates a draft and publishes only after attaching
   );
 });
 
+// --- release-provenance.yml: the tag comes from the input, not the event ------
+//
+// #37: release-cut.yml's header prescribes chaining this workflow as a dependent
+// job, because a tag GITHUB_TOKEN pushes triggers nothing. But that run's event
+// is workflow_dispatch on a BRANCH, so `github.ref_name` is the branch. With the
+// tag read from the event, the chained job checked out main, attested main's
+// HEAD, and created a draft release literally named `main` — while the real
+// v<version> tag got no release and no provenance.
+//
+// Two properties, and the second is the one a later edit would quietly undo:
+// the checkout must be pinned to the resolved tag, and nothing may read
+// $GITHUB_REF_NAME afterwards — one leftover reference is enough to send a
+// chained release back to the branch.
+test("release-provenance.yml: resolves the tag from the input, never from the event", () => {
+  const src = readFileSync(new URL("./.github/workflows/release-provenance.yml", import.meta.url), "utf8");
+
+  assert.match(src, /^\s{6}tag:$/m, "the `tag` input is missing — chained callers cannot name the tag");
+  assert.match(
+    src,
+    /TAG:\s*\$\{\{\s*inputs\.tag\s*\|\|\s*github\.ref_name\s*\}\}/,
+    "TAG must fall back to github.ref_name, so the tag-push path stays byte-identical",
+  );
+  assert.match(
+    src,
+    /ref:\s*\$\{\{\s*inputs\.tag\s*\|\|\s*github\.ref_name\s*\}\}/,
+    "the caller checkout must be pinned to the resolved tag — otherwise a chained run attests the branch",
+  );
+
+  // Comments may still name it; a shell expansion may not.
+  const shellRefs = src.split("\n").filter((l) => !l.trim().startsWith("#") && l.includes("$GITHUB_REF_NAME"));
+  assert.deepEqual(
+    shellRefs,
+    [],
+    "a $GITHUB_REF_NAME expansion survives — on a chained run that is the branch, which is exactly #37",
+  );
+});
+
 // The artifact hand-off is the one-writer path out of #19: assets are attached by
 // this job rather than by a second workflow racing it for the same release. It
 // needs `actions: read` to see the run, and a called workflow only ever gets the
