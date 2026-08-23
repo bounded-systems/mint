@@ -120,7 +120,19 @@ jobs:
     # signed Statement already landed, and a published release is IMMUTABLE — the
     # upload would 422 for work that had in fact succeeded (#19). Recovery is for
     # the registries, which are the half that fails on its own.
-    if: ${{ inputs.recover-tag == '' }}
+    # A STATUS FUNCTION IS MANDATORY ON EVERY JOB DOWNSTREAM OF `cut`.
+    #
+    # GitHub propagates a skip through the entire `needs` CLOSURE, not one hop:
+    # `cut` is SKIPPED on the tag-push and recovery doors, and every job that
+    # transitively needs it is skipped too — unless that job ITSELF calls a
+    # status function. `resolve`'s `!cancelled()` clears the taint for `resolve`
+    # and nothing else, and a plain condition clears it not at all.
+    #
+    # Shipped broken: site-mcp's v0.3.0 recovery resolved the tag, skipped every
+    # job beneath it and reported SUCCESS having published nothing. A dry run
+    # cannot tell that apart from correct behaviour, because a dry run skips
+    # those same jobs on purpose.
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && inputs.recover-tag == '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub release
