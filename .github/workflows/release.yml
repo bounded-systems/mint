@@ -58,6 +58,10 @@ on:
         description: "Verify only — run every guard and cut nothing."
         type: boolean
         default: true
+      recover-tag:
+        description: "RECOVERY: re-publish this existing tag (e.g. v0.8.0). Skips the cut and the GitHub release."
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -66,7 +70,7 @@ jobs:
   # The CI cut. Skipped entirely on the tag-push path, where the tag already
   # exists and was created from a checkout.
   cut:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.recover-tag == ''
     permissions:
       contents: write # create + push the tag
     uses: ./.github/workflows/release-cut.yml
@@ -86,7 +90,7 @@ jobs:
   # every publish below with it.
   resolve:
     needs: [cut]
-    if: ${{ !cancelled() && (github.event_name == 'push' || needs.cut.outputs.cut == 'true') }}
+    if: ${{ !cancelled() && (github.event_name == 'push' || inputs.recover-tag != '' || needs.cut.outputs.cut == 'true') }}
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -94,6 +98,7 @@ jobs:
       - name: Resolve the tag
         id: tag
         env:
+          RECOVER: ${{ inputs.recover-tag }}
           CUT_TAG: ${{ needs.cut.outputs.tag }}
           REF: ${{ github.ref_name }}
         run: |
@@ -101,7 +106,7 @@ jobs:
           # On a dispatch, $REF is the BRANCH — using it would test, pack, attest
           # and publish main under a version tag's name. The cut tag wins, and
           # the v-shape check below is what stops a branch name reaching a job.
-          tag="${CUT_TAG:-$REF}"
+          tag="${RECOVER:-${CUT_TAG:-$REF}}"
           case "$tag" in
             v[0-9]*) ;;
             *) echo "::error::'$tag' is not a v<version> tag — refusing to release a branch"; exit 1 ;;
@@ -111,6 +116,11 @@ jobs:
 
   release:
     needs: resolve
+    # Skipped on the recovery door: that tag's GitHub release, attestation and
+    # signed Statement already landed, and a published release is IMMUTABLE — the
+    # upload would 422 for work that had in fact succeeded (#19). Recovery is for
+    # the registries, which are the half that fails on its own.
+    if: ${{ inputs.recover-tag == '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub release
@@ -168,6 +178,9 @@ jobs:
   # ---------------------------------------------------------------------------
   npm:
     needs: [release, resolve]
+    # `release` is SKIPPED on the recovery door, and a plain `needs:` would skip
+    # this with it — which would make the recovery door publish nothing at all.
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
     permissions:
       contents: read
       id-token: write
@@ -178,6 +191,9 @@ jobs:
 
   jsr:
     needs: [release, resolve]
+    # `release` is SKIPPED on the recovery door, and a plain `needs:` would skip
+    # this with it — which would make the recovery door publish nothing at all.
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:

@@ -401,6 +401,49 @@ test("release.yml: both triggers, chained cut, one resolved tag", () => {
   assert.deepEqual(shellRefs, [], "a $GITHUB_REF_NAME expansion survives — on a chained run that is the branch");
 });
 
+// The recovery door. A publish can fail on its own — mint's own npm sat three
+// tags behind because v0.7.0/0.7.1/0.7.2's registry publishes never ran — and
+// re-cutting is not the recovery: release-cut refuses an existing tag, by design.
+// So `recover-tag` republishes an existing tag, and must skip the two things that
+// already landed: the cut, and the GitHub release (published releases are
+// IMMUTABLE, so re-uploading 422s for work that succeeded).
+//
+// The subtle half is the registries. They `needs: [release, resolve]`, and a
+// SKIPPED dependency skips its dependents by default — so without an explicit
+// status condition the recovery door would run the resolve and then publish
+// nothing at all, greenly. That is the failure shape this whole file exists to
+// catch, so it is asserted rather than trusted.
+test("release.yml: the recovery door republishes without re-cutting or re-releasing", () => {
+  const src = wf(NPM_ENTRY);
+  const body = code(src);
+
+  assert.match(body, /^\s{6}recover-tag:$/m, "the recover-tag input is missing");
+  assert.match(
+    job(src, "cut"),
+    /inputs\.recover-tag == ''/,
+    "the cut must be skipped on the recovery door — release-cut refuses an existing tag",
+  );
+  assert.match(job(src, "resolve"), /RECOVER: \$\{\{ inputs\.recover-tag \}\}/, "resolve must read the recovery tag");
+  assert.match(
+    job(src, "resolve"),
+    /inputs\.recover-tag != ''/,
+    "the recovery door is not an accepted entry — resolve would skip and publish nothing",
+  );
+  assert.match(
+    job(src, "release"),
+    /if:\s*\$\{\{ inputs\.recover-tag == '' \}\}/,
+    "the GitHub release must be skipped on recovery — a published release is immutable",
+  );
+
+  for (const registry of ["npm", "jsr"]) {
+    assert.match(
+      job(src, registry),
+      /needs\.release\.result == 'skipped'/,
+      `${registry} must still run when \`release\` is SKIPPED, or the recovery door publishes nothing`,
+    );
+  }
+});
+
 // The environment claim is the half of the npm pin that only exists if the
 // PUBLISHING job carries `environment:` itself. mint used a no-op `approve` job
 // for the gate, which blocks the publish but puts no `environment` claim in the
