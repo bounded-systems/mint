@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0 — 2026-08-23
+
+### Minor
+
+- npm-publish.yml — a reusable npm publish lane, and one prescribed release entry point per repo (npm validates the CALLING workflow)
+
 ## 0.7.2 — 2026-08-22
 
 ### Patch
