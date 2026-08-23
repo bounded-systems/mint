@@ -133,13 +133,24 @@ finish line, it does not order the two workflows.
 
 ## Publish (npm + JSR)
 
-mint ships from `release.yml` on each `v*` tag via **OIDC trusted publishing** —
-no `NPM_TOKEN`, no JSR token, ever. The package manifests are kept in lockstep by
+mint ships from [`release.yml`](.github/workflows/release.yml) via **OIDC trusted
+publishing** — no `NPM_TOKEN`, no JSR token, ever. That one file is the whole
+release entry point: dispatch it to cut the tag in CI, or let it fire on a `v*` tag
+cut from a checkout. It is one file rather than two because **npm validates the
+entry workflow's filename, not the file containing `npm publish`**, and a package
+gets exactly one trusted publisher — so a repo may have exactly one entry workflow
+that reaches npm. That convention, and the npm form values it makes uniform, are in
+[docs/npm-trusted-publishing.md](docs/npm-trusted-publishing.md); the lane itself is
+the reusable [`npm-publish.yml`](.github/workflows/npm-publish.yml), which consumers
+call instead of hand-rolling a publisher. The package manifests are kept in lockstep by
 `mint version` (it bumps `package.json`, `package-lock.json`, **and** `jsr.json`).
 
-**npm uses a GitHub Environment gate** — the `npm-approve` job is blocked by the
+**npm uses a GitHub Environment gate** — both the `npm` and `jsr` jobs declare the
 `npm-publish` environment, which requires a designated reviewer to approve in the
-GitHub Actions UI before `npm publish` runs. Approve at:
+GitHub Actions UI before either registry sees anything. The gate sits on the
+publishing jobs themselves rather than on a no-op `approve` job upstream, because
+that is the only way the `environment` claim reaches the OIDC token — and that
+claim is what npm's trusted-publisher **Environment** field pins. Approve at:
 
 ```
 https://github.com/bounded-systems/mint/actions

@@ -1,55 +1,127 @@
 name: release
 
-# On a vX.Y.Z tag (pushed by `mint release`):
-#   release — test, pack, SLSA-attest the tarball, emit + keyless-sign the
-#             in-toto release Statement (tag → version plan → commit), publish
-#             the GitHub release (notes from the tag annotation mint wrote) with
-#             the statement + its Sigstore bundle attached.
-#   approve — gated by the `npm-publish` GitHub Environment (required reviewer).
-#             No-op job: a maintainer approves in the Actions UI, which unblocks
-#             all deploy jobs below. Add new deploy targets as separate jobs with
-#             needs: [release, approve].
-#   npm     — publish to npm via OIDC trusted publishing (no token).
-#   jsr     — publish to JSR via OIDC (no token).
+# THE SINGLE RELEASE ENTRY POINT. Two triggers, one file, on purpose (#48).
 #
-# This workflow covers: npm (staged) + JSR + GitHub release.
-# Out of scope here — triggered separately on the same tag:
-#   Nix flakes    — flake consumers pin a sha; update PRs are opened by the
+#   workflow_dispatch  the release, from the Actions UI — `cut` calls
+#                      release-cut.yml to create the tag in CI, and the rest of
+#                      the run chains off it. This is the path that means nobody
+#                      needs `git push origin v0.3.0` from a laptop (#22, #39).
+#   push: tags ["v*"]  a tag cut from a checkout by `mint release`.
+#
+# ############################################################################
+# # WHY ONE FILE, AND WHY THIS FILENAME.                                     #
+# ############################################################################
+#
+# npm's trusted publishing validates the ENTRY workflow's filename, not the file
+# that contains `npm publish` — and a package may have exactly ONE trusted
+# publisher configured. So every trigger that reaches npm has to live in one
+# file, and that file's name is the value typed into npm's form. mint prescribes
+# `release.yml` org-wide; see docs/npm-trusted-publishing.md and the header of
+# .github/workflows/npm-publish.yml.
+#
+# This is why `cut.yml` no longer exists: it was a second dispatchable entry
+# point that reached npm through this workflow, so npm validated `cut.yml` for a
+# dispatched release and `release.yml` for a tag push. One publisher slot cannot
+# cover both, and the failure only shows up as ENEEDAUTH after the tag is cut.
+#
+# ############################################################################
+# # A TAG PUSHED BY CI TRIGGERS NOTHING — THE WORK MUST BE CHAINED.          #
+# ############################################################################
+#
+# GitHub creates no workflow runs from events caused by GITHUB_TOKEN. The
+# `push: tags` trigger above will NOT fire for the tag `cut` pushes, so every
+# downstream job depends on `cut` rather than waiting to be triggered by it.
+# `resolve` is what joins the two paths into one tag.
+#
+# DRY RUN DEFAULTS TO TRUE. A registry publish is irreversible — JSR versions are
+# immutable — so verifying is the default and releasing is the explicit act.
+# Dispatch once to watch every guard pass, then again with dry-run unchecked.
+#
+# What this workflow covers: the GitHub release (SLSA + cosign attestations),
+# npm and JSR. Out of scope, triggered separately on the same tag:
+#   Nix flakes    — flake consumers pin a sha; update PRs come from the
 #                   flake-update bot when the tag lands on the default branch.
 #   GHCR images   — OCI builds run in their own repo/workflow and reference the
 #                   published npm tarball or the GitHub release asset.
 #   Other deploys — bounded-systems infra workflows consume the GH release event.
+
 on:
   push:
     tags: ["v*"]
-  # Callable so the CI-cut path can chain this as a dependent job. A tag pushed
-  # by GITHUB_TOKEN triggers nothing, so `cut.yml` cannot rely on the trigger
-  # above — it calls this workflow directly and passes the tag it just cut (#39).
-  workflow_call:
+  workflow_dispatch:
     inputs:
-      tag:
-        description: >-
-          The v<version> tag to release. Defaults to the triggering ref, which is
-          correct for the tag-push path. A chained caller MUST pass it: that run's
-          event is workflow_dispatch on a BRANCH, so github.ref_name is the branch
-          and every job below would test, pack, attest and release main instead.
+      expect-version:
+        description: "Version you expect to cut (e.g. 0.8.0). Fails if the manifest disagrees."
         type: string
-        default: ""
+        required: false
+      dry-run:
+        description: "Verify only — run every guard and cut nothing."
+        type: boolean
+        default: true
 
 permissions:
-  contents: write      # create the GitHub release
-  id-token: write      # OIDC — SLSA attestation, cosign keyless, npm/JSR publishing
-  attestations: write
+  contents: read
 
 jobs:
-  release:
+  # The CI cut. Skipped entirely on the tag-push path, where the tag already
+  # exists and was created from a checkout.
+  cut:
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write # create + push the tag
+    uses: ./.github/workflows/release-cut.yml
+    with:
+      # Self-hosted call: run the mint runtime from the commit being released.
+      ref: ${{ github.sha }}
+      expect-version: ${{ inputs.expect-version }}
+      dry-run: ${{ inputs.dry-run }}
+
+  # ONE tag for both paths, resolved once, so no job downstream has to know how
+  # this run started. `!cancelled()` rather than `always()`: `cut` is SKIPPED on
+  # the tag-push path, and a `needs:` on a skipped job would skip this too — but
+  # a cancelled run must still stop here.
+  #
+  # The condition is also the dry-run gate. `cut` outputs `cut: 'false'` for a
+  # dry run and nothing at all when it failed, so both leave this job skipped and
+  # every publish below with it.
+  resolve:
+    needs: [cut]
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.cut.outputs.cut == 'true') }}
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Resolve the tag
+        id: tag
+        env:
+          CUT_TAG: ${{ needs.cut.outputs.tag }}
+          REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # On a dispatch, $REF is the BRANCH — using it would test, pack, attest
+          # and publish main under a version tag's name. The cut tag wins, and
+          # the v-shape check below is what stops a branch name reaching a job.
+          tag="${CUT_TAG:-$REF}"
+          case "$tag" in
+            v[0-9]*) ;;
+            *) echo "::error::'$tag' is not a v<version> tag — refusing to release a branch"; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "releasing $tag"
+
+  release:
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # OIDC — SLSA attestation + cosign keyless signing
+      attestations: write
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ needs.resolve.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ needs.resolve.outputs.tag }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
@@ -85,38 +157,57 @@ jobs:
             mint-release.intoto.json \
             mint-release.intoto.sigstore.json
 
-  approve:
-    needs: release
-    runs-on: ubuntu-latest
-    environment: npm-publish   # required reviewer — approving here unblocks all deploys
-    steps:
-      - run: echo "Approved."
-
+  # ---------------------------------------------------------------------------
+  # Registry publishes. Both are gated by the `npm-publish` GitHub Environment
+  # (required reviewer) — a maintainer approves once in the Actions UI and both
+  # jobs unblock. The gate lives ON these jobs rather than on a no-op `approve`
+  # job so that the OIDC token they present actually CARRIES the `environment`
+  # claim; that claim is what npm's trusted-publisher Environment field pins, and
+  # without it the pin cannot be set. A gate a registry can verify beats a gate
+  # that is only job ordering.
+  # ---------------------------------------------------------------------------
   npm:
-    needs: [release, approve]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
-        with:
-          ref: ${{ inputs.tag || github.ref_name }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-      - run: npm ci --no-audit --no-fund
-      - name: Publish to npm (OIDC trusted publishing — no token)
-        run: npm publish --access public --provenance
+    needs: [release, resolve]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/npm-publish.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+      environment: npm-publish
 
   jsr:
-    needs: [release, approve]
+    needs: [release, resolve]
     runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write # tokenless OIDC publish to JSR
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ needs.resolve.outputs.tag }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
+          package-manager-cache: false
       - run: npm ci --no-audit --no-fund
+      # JSR versions are IMMUTABLE, so this idempotence is load-bearing rather
+      # than tidy: a recovery dispatch must not go red on the one registry that
+      # already succeeded (site-mcp#38).
+      - name: Already on JSR?
+        id: on-jsr
+        run: |
+          set -euo pipefail
+          pkg=$(jq -r .name jsr.json)
+          version=$(jq -r .version jsr.json)
+          code=$(curl -sS -o /dev/null -w '%{http_code}' "https://jsr.io/${pkg}/${version}_meta.json")
+          if [ "$code" = "200" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::JSR already has $pkg@$version — skipping the publish"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish to JSR (OIDC — no token)
-        run: npx jsr publish --allow-slow-types
+        if: steps.on-jsr.outputs.skip != 'true'
+        run: npx --yes jsr publish --allow-slow-types
