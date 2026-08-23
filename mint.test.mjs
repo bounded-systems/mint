@@ -737,3 +737,39 @@ test("every job downstream of `cut` calls a status function", () => {
     );
   }
 });
+
+// --- a caller must grant everything the lane declares, or nothing runs --------
+//
+// GitHub validates a called workflow's `permissions:` as the UNION with the
+// caller's, at LOAD time — before any `if:`, and regardless of which steps would
+// execute. Withholding one produces `startup_failure`: no job starts, so there
+// is no job log to read and no failing step to point at (site-mcp#36 lost a
+// dispatch to exactly this, over `actions: read` on release-provenance).
+//
+// So when the lane gains a permission, mint's own caller has to gain it in the
+// same commit. Deriving both sides from the files makes that automatic rather
+// than remembered.
+test("release.yml's npm caller grants everything npm-publish.yml declares", () => {
+  const perms = (src) => {
+    const m = /^permissions:\n((?:  \w[\w-]*:[^\n]*\n)+)/m.exec(code(src));
+    assert.ok(m, "no top-level permissions block");
+    return new Set(
+      m[1].split("\n").filter(Boolean).map((l) => l.trim().replace(/\s*#.*$/, "")),
+    );
+  };
+  const declared = perms(wf(PUBLISH_LANE));
+
+  const callerBlock = job(wf(NPM_ENTRY), "npm");
+  const granted = new Set(
+    [...callerBlock.matchAll(/^\s{6}([\w-]+:\s*\w+)/gm)].map((m) => m[1].replace(/\s+/g, " ")),
+  );
+
+  for (const p of declared) {
+    assert.ok(
+      granted.has(p),
+      `npm-publish.yml declares \`${p}\` but release.yml's npm job does not grant it. ` +
+        `GitHub unions these at LOAD time, so the whole run fails with startup_failure — ` +
+        `no job, no log. Granted: ${[...granted].join(", ") || "(none)"}`,
+    );
+  }
+});

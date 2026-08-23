@@ -117,6 +117,7 @@ on:
 permissions:
   contents: read
   id-token: write # OIDC — the token npm exchanges for publish auth
+  actions: read # read THIS run's approval records — see "the gate reports itself"
 
 jobs:
   publish:
@@ -242,6 +243,50 @@ jobs:
         env:
           CMD: ${{ inputs.test }}
         run: bash -euo pipefail -c "$CMD"
+
+      # THE GATE REPORTS ITSELF.
+      #
+      # `environment:` above puts the environment claim in the OIDC token, which
+      # is what npm's trusted-publisher Environment field pins. It does NOT mean
+      # a human approved anything: GitHub auto-creates an environment the first
+      # time a job names one, with NO protection rules, and that ungated
+      # environment satisfies npm's check exactly as a gated one does.
+      #
+      # Two packages shipped that way before anyone noticed
+      # (bounded-systems/.github-private#694). Nobody could have noticed sooner:
+      # protection rules need repo ADMIN to read, and `administration` is not a
+      # valid workflow permissions key — so no workflow can check its own gate
+      # directly, and the org retired that door on ocap grounds anyway.
+      #
+      # The run's APPROVAL RECORDS are readable with `actions: read`, which IS a
+      # valid permission. An empty list means nothing was approved, which means
+      # the environment gated nothing. That is the check.
+      #
+      # It warns rather than fails, deliberately. An ungated publish is a
+      # configuration weakness, not a corrupt artifact — refusing here would turn
+      # a missing reviewer into a half-shipped release, which is a worse failure
+      # than the one being reported.
+      - name: Did anyone actually approve this?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          approvals=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/approvals" 2>/dev/null || echo "[]")
+          count=$(printf '%s' "$approvals" | node -e '
+            let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+              try { const a = JSON.parse(s); console.log(Array.isArray(a) ? a.length : 0); }
+              catch { console.log(0); }
+            });
+          ')
+          if [ "$count" -gt 0 ]; then
+            echo "approved by $count reviewer(s) — the $ENVIRONMENT gate held"
+          else
+            echo "::warning::Publishing with NO approval recorded on the '$ENVIRONMENT' environment." \
+                 "The environment exists (npm's Environment pin matches) but has no required reviewer," \
+                 "so it is a label, not a gate. Add one: Settings -> Environments -> $ENVIRONMENT ->" \
+                 "Required reviewers -> Save protection rules. See bounded-systems/.github-private#694."
+          fi
 
       # No NPM_TOKEN: npm performs the OIDC exchange with the trusted-publisher
       # endpoint itself and attaches provenance automatically.
