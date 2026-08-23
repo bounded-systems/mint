@@ -429,9 +429,12 @@ test("release.yml: the recovery door republishes without re-cutting or re-releas
     /inputs\.recover-tag != ''/,
     "the recovery door is not an accepted entry — resolve would skip and publish nothing",
   );
+  // The condition, not its exact spelling: the `if:` also has to carry a status
+  // function (see the skip-taint test below), so pinning the whole expression
+  // makes this fixture fight that one.
   assert.match(
     job(src, "release"),
-    /if:\s*\$\{\{ inputs\.recover-tag == '' \}\}/,
+    /if:.*inputs\.recover-tag == ''/,
     "the GitHub release must be skipped on recovery — a published release is immutable",
   );
 
@@ -669,4 +672,68 @@ test("release-cut.yml: the tag is annotated with --cleanup=verbatim (#45)", () =
     /git tag -a "\$TAG" --cleanup=verbatim -F /,
     "without --cleanup=verbatim git strips the entry's `##` and `###` heading lines",
   );
+});
+
+// --- every job downstream of a skippable job needs a STATUS FUNCTION ---------
+//
+// GitHub propagates a skip through the entire `needs` CLOSURE, not one hop.
+// `cut` is SKIPPED on two of the three doors (tag push, and recovery), so every
+// job transitively needing it is skipped too — unless that job ITSELF calls a
+// status function (`always()`, `cancelled()`, `success()`, `failure()`). A plain
+// condition does NOT clear the taint, and neither does an upstream job having
+// cleared it: `resolve`'s `!cancelled()` covers `resolve` alone.
+//
+// This shipped broken. site-mcp's v0.3.0 recovery dispatch resolved the tag,
+// skipped every job beneath it, and reported SUCCESS having published nothing —
+// the exact "green control that gates nothing" these fixtures exist to prevent.
+// It survived because a DRY RUN skips those same jobs on purpose, so a green dry
+// run carries no information about this defect at all.
+//
+// The rule is structural, so the assertion is too: the closure is derived from
+// the file rather than from a list of job names a later edit would leave stale.
+test("every job downstream of `cut` calls a status function", () => {
+  const src = code(wf(NPM_ENTRY));
+  const section = src.slice(src.indexOf("\njobs:") + 1);
+
+  const jobs = {};
+  let cur = null;
+  for (const line of section.split("\n").slice(1)) {
+    const m = /^ {2}([A-Za-z][\w-]*):\s*$/.exec(line);
+    if (m) { cur = m[1]; jobs[cur] = ""; continue; }
+    if (cur) jobs[cur] += line + "\n";
+  }
+
+  const needsOf = (block) => {
+    const m = /^\s*needs:\s*(.+)$/m.exec(block);
+    if (!m) return [];
+    const raw = m[1].trim();
+    return raw.startsWith("[")
+      ? raw.slice(1, -1).split(",").map((s) => s.trim()).filter(Boolean)
+      : [raw];
+  };
+
+  const downstream = new Set();
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [job, block] of Object.entries(jobs)) {
+      if (downstream.has(job)) continue;
+      if (needsOf(block).some((n) => n === "cut" || downstream.has(n))) {
+        downstream.add(job);
+        grew = true;
+      }
+    }
+  }
+  assert.ok(downstream.size >= 3, `expected cut to have downstream jobs, found ${downstream.size}`);
+
+  const STATUS_FN = /\b(always|cancelled|success|failure)\s*\(\s*\)/;
+  for (const job of downstream) {
+    const cond = /^\s*if:\s*(.+)$/m.exec(jobs[job])?.[1] ?? "";
+    assert.match(
+      cond,
+      STATUS_FN,
+      `job \`${job}\` is downstream of the skippable \`cut\` but its \`if:\` calls no status ` +
+        `function — GitHub skips it on the tag-push and recovery doors, and the run reports ` +
+        `success having done nothing. Found if: ${cond || "(none)"}`,
+    );
+  }
 });
