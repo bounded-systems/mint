@@ -64,6 +64,11 @@ const RELEASE_YML = `name: release
 # (cut by \`mint release\`), emits the deterministic in-toto release Statement
 # (tag → version plan → commit), keyless-signs it (cosign/OIDC), and attaches it
 # to the GitHub release. Pinned to an immutable mint commit SHA; bump when mint tags.
+#
+# THIS FILENAME IS LOAD-BEARING. npm's trusted publishing validates the ENTRY
+# workflow's filename, not the file containing \`npm publish\`, and a package gets
+# exactly ONE trusted publisher. So if this repo publishes to npm, the publish job
+# belongs HERE — never in a second workflow. See mint → docs/npm-trusted-publishing.md.
 on:
   push:
     tags: ["v*"]

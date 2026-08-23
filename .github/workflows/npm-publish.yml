@@ -1,0 +1,262 @@
+# Reusable npm publish (workflow_call). Owns the five things every consumer was
+# rediscovering by hand: the version floors, the cache-off, the tag-pinned
+# checkout, the idempotence guard, and `npm publish --provenance` over OIDC
+# trusted publishing (no NPM_TOKEN, ever).
+#
+# ############################################################################
+# # npm VALIDATES THE ENTRY WORKFLOW, NOT THE FILE CONTAINING `npm publish`.  #
+# ############################################################################
+#
+# From npm's trusted-publishing docs:
+#
+#   "Some GitHub Actions workflows use `workflow_call` to invoke other workflows
+#    that run `npm publish`… When this happens, validation checks the CALLING
+#    workflow's name instead of the workflow that actually contains the publish
+#    command, which can cause configuration mismatches."
+#
+# and:
+#
+#   "Each package can only have ONE trusted publisher configured at a time."
+#
+# Together those two facts decide the architecture. This file is never the name
+# npm sees — the consumer's ENTRY workflow is. And with one publisher slot per
+# package, a repo may have exactly ONE entry workflow that reaches npm.
+#
+# So the convention is prescribed, not left to each repo (#48):
+#
+#   .github/workflows/release.yml   ← the single npm entry point, org-wide
+#   environment: npm-publish        ← the environment claim npm pins
+#
+# Every trigger that must reach npm — the tag push from a laptop cut, the
+# dispatch that cuts in CI, the recovery dispatch for a half-shipped release —
+# lives in that one file. Then the npm form is the same table for every package:
+#
+#   Organization or user  <owner>        Workflow filename  release.yml
+#   Repository            <repo>         Environment        npm-publish
+#
+# See docs/npm-trusted-publishing.md. Getting it wrong is invisible until a
+# release dies with ENEEDAUTH after the tag is already pushed.
+#
+# Caller:
+#
+#   npm:
+#     needs: [release, resolve]
+#     permissions: { contents: read, id-token: write }
+#     uses: bounded-systems/mint/.github/workflows/npm-publish.yml@<sha>
+#     with:
+#       tag: ${{ needs.resolve.outputs.tag }}
+#
+# PRIVATE REPOS GET NO PROVENANCE. Sigstore provenance requires a public source
+# repo; `--provenance` fails in a private one even with trusted publishing
+# working. Pass `provenance: false` there rather than debugging it.
+name: npm-publish (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: >-
+          The v<version> tag to publish. Defaults to the triggering ref, which is
+          correct only for a tag push. A CHAINED caller MUST pass it: that run's
+          event is workflow_dispatch on a BRANCH, so github.ref_name is the branch
+          and this would publish main under a version tag's name (site-mcp#34).
+        type: string
+        default: ""
+      node-version:
+        description: >-
+          Node version. Must ship npm >= 11.5.1 — Node 24 does, Node 22's bundled
+          npm 10.x does not. Raise this rather than installing npm globally.
+        type: string
+        default: "24"
+      package-dir:
+        description: "Directory holding the package.json to publish."
+        type: string
+        default: "."
+      environment:
+        description: >-
+          GitHub Environment this publish runs in. It is the `environment` claim
+          in the OIDC token, so it is what npm's trusted-publisher Environment
+          field pins — and, with a required reviewer on it, what makes that pin a
+          gate rather than a label. Keep the org-wide default.
+        type: string
+        default: npm-publish
+      install:
+        description: "Dependency install command."
+        type: string
+        default: "npm ci --no-audit --no-fund"
+      build:
+        description: "Build command. Empty = no build step."
+        type: string
+        default: ""
+      test:
+        description: "Test command. Empty = no test step."
+        type: string
+        default: ""
+      access:
+        description: "npm access level (`public` for a scoped public package)."
+        type: string
+        default: public
+      provenance:
+        description: "Attach Sigstore provenance. Set false in a PRIVATE repo — see the header."
+        type: boolean
+        default: true
+    outputs:
+      name:
+        description: "Package name read from package.json."
+        value: ${{ jobs.publish.outputs.name }}
+      version:
+        description: "Version read from package.json."
+        value: ${{ jobs.publish.outputs.version }}
+      published:
+        description: "'true' only if THIS run pushed the version to npm ('false' when it was already there)."
+        value: ${{ jobs.publish.outputs.published }}
+
+# Declared here and validated as a UNION with the caller's grant at LOAD time,
+# before any `if:` runs — a caller that withholds one of these gets
+# startup_failure, not a skipped job (site-mcp#36).
+permissions:
+  contents: read
+  id-token: write # OIDC — the token npm exchanges for publish auth
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Not settable by the caller: a job with `uses:` may not carry `environment:`,
+    # so a reusable publish lane can only be environment-gated from in here.
+    environment: ${{ inputs.environment }}
+    outputs:
+      name: ${{ steps.pkg.outputs.name }}
+      version: ${{ steps.pkg.outputs.version }}
+      published: ${{ steps.publish.outputs.published || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          registry-url: "https://registry.npmjs.org"
+          # npm's own guidance for release builds: a restored cache can seed the
+          # publish with dependency state that no lockfile resolution produced.
+          package-manager-cache: false
+
+      # ASSERT, NEVER MUTATE. `npm install -g npm@latest` in a release path is how
+      # npm v12 arrived unannounced and killed a publish: v12 disables remote-tarball
+      # deps by default, so `npm ci` died with EALLOWREMOTE before anything shipped
+      # (site-mcp#38). The floor is a property of the runner image — check it and
+      # fail loudly if a future image drops below it; do not pull an unreviewed npm
+      # into the one job that holds a publishing credential.
+      #
+      # 11.5.1, not 11.5.0: 11.5.0 shipped trusted publishing and 11.5.1 is the
+      # first version npm documents as supporting it.
+      - name: Assert the trusted-publishing floors (npm >= 11.5.1, node >= 22.14.0)
+        env:
+          NPM_FLOOR: 11.5.1
+          NODE_FLOOR: 22.14.0
+        run: |
+          set -euo pipefail
+          # `have >= floor` iff sorting the pair version-wise puts floor first.
+          # Equal values sort to the floor too, so the floor itself passes.
+          atleast() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$2" ]; }
+          npm_have="$(npm --version)"
+          node_have="$(node --version)"; node_have="${node_have#v}"
+          echo "npm $npm_have / node $node_have"
+          if ! atleast "$npm_have" "$NPM_FLOOR"; then
+            echo "::error::npm $npm_have is below $NPM_FLOOR, which trusted publishing requires." \
+                 "Raise node-version rather than installing npm globally here."
+            exit 1
+          fi
+          if ! atleast "$node_have" "$NODE_FLOOR"; then
+            echo "::error::node $node_have is below $NODE_FLOOR, which trusted publishing requires."
+            exit 1
+          fi
+
+      - name: Resolve the package identity
+        id: pkg
+        working-directory: ${{ inputs.package-dir }}
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          name=$(jq -r '.name // empty' package.json)
+          version=$(jq -r '.version // empty' package.json)
+          if [ -z "$name" ] || [ -z "$version" ]; then
+            echo "::error::package.json in '${{ inputs.package-dir }}' has no name/version"
+            exit 1
+          fi
+          # $TAG is a real tag on a tag push and on a chained call; it is a BRANCH
+          # name on a bare dispatch, where there is nothing to compare against.
+          # Say that out loud rather than comparing $version to itself and
+          # reporting a green check that gated nothing.
+          case "$TAG" in
+            v[0-9]*)
+              if [ "${TAG#v}" != "$version" ]; then
+                echo "::error::tag $TAG does not match package.json version $version at that ref"
+                exit 1
+              fi ;;
+            *) echo "::notice::no version tag in scope (ref '$TAG') — publishing $name@$version unpinned" ;;
+          esac
+          echo "name=$name"       >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "$name@$version"
+
+      # IDEMPOTENT BY CONSTRUCTION. A partial release has to be recoverable by
+      # re-dispatching the entry workflow, and npm refuses to republish an
+      # existing version — so on a recovery run an already-published registry is
+      # a SKIP, not a failure (site-mcp#38 went red for the one registry that
+      # had in fact succeeded).
+      - name: Already on npm?
+        id: on-npm
+        env:
+          NAME: ${{ steps.pkg.outputs.name }}
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          set -euo pipefail
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::npm already has $NAME@$VERSION — skipping the publish"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.on-npm.outputs.skip != 'true'
+        working-directory: ${{ inputs.package-dir }}
+        env:
+          CMD: ${{ inputs.install }}
+        run: bash -euo pipefail -c "$CMD"
+
+      - name: Build
+        if: ${{ steps.on-npm.outputs.skip != 'true' && inputs.build != '' }}
+        working-directory: ${{ inputs.package-dir }}
+        env:
+          CMD: ${{ inputs.build }}
+        run: bash -euo pipefail -c "$CMD"
+
+      - name: Test
+        if: ${{ steps.on-npm.outputs.skip != 'true' && inputs.test != '' }}
+        working-directory: ${{ inputs.package-dir }}
+        env:
+          CMD: ${{ inputs.test }}
+        run: bash -euo pipefail -c "$CMD"
+
+      # No NPM_TOKEN: npm performs the OIDC exchange with the trusted-publisher
+      # endpoint itself and attaches provenance automatically.
+      - name: Publish to npm (OIDC trusted publishing)
+        id: publish
+        if: steps.on-npm.outputs.skip != 'true'
+        working-directory: ${{ inputs.package-dir }}
+        env:
+          ACCESS: ${{ inputs.access }}
+          PROVENANCE: ${{ inputs.provenance }}
+        run: |
+          set -euo pipefail
+          if [ "$PROVENANCE" = "true" ]; then
+            npm publish --access "$ACCESS" --provenance
+          else
+            npm publish --access "$ACCESS"
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
