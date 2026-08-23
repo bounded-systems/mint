@@ -196,6 +196,11 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # npm-publish.yml reads THIS run's approval records to report whether the
+      # environment gate actually held. GitHub validates a called workflow's
+      # permission requests as the UNION, at LOAD time — withholding this fails
+      # the whole run with startup_failure, no job, no log (site-mcp#36).
+      actions: read
     uses: ./.github/workflows/npm-publish.yml
     with:
       tag: ${{ needs.resolve.outputs.tag }}

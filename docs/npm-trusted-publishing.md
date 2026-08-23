@@ -54,6 +54,20 @@ The npm form is then the same table for every package in the org:
 | Workflow filename | `release.yml` |
 | Environment | `npm-publish` |
 
+`actions: read` is the newest of those three, and it is what lets the lane report
+**whether the gate actually held**. An environment satisfies npm's Environment pin
+whether or not it has a required reviewer — GitHub auto-creates one, ungated, the
+first time a job names it, and two org packages shipped through such an
+environment before anyone noticed. Protection rules need repo *admin* to read and
+`administration` is not a valid workflow permission, so no workflow can check its
+own gate directly; the run's approval records can be read, and an empty list means
+nothing was approved. The lane warns rather than fails — an ungated publish is a
+configuration weakness, not a corrupt artifact.
+
+Existing consumers pin mint by SHA, so nothing breaks until you repin. **When you
+repin past this, add `actions: read` in the same commit** or the run dies at load
+time with `startup_failure`.
+
 Pinning the Environment is what turns the reviewer gate into something npm can
 verify. The `environment` claim only appears in the OIDC token of a job that
 *itself* declares `environment:` — a separate no-op `approve` job upstream does
@@ -95,7 +109,7 @@ jobs:
   npm:
     needs: resolve
     if: ${{ !cancelled() && needs.resolve.result == 'success' }}   # see below — load-bearing
-    permissions: { contents: read, id-token: write }
+    permissions: { contents: read, id-token: write, actions: read }
     uses: bounded-systems/mint/.github/workflows/npm-publish.yml@<sha>
     with:
       tag: ${{ needs.resolve.outputs.tag }}
