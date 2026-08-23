@@ -94,11 +94,21 @@ jobs:
 
   npm:
     needs: resolve
+    if: ${{ !cancelled() && needs.resolve.result == 'success' }}   # see below — load-bearing
     permissions: { contents: read, id-token: write }
     uses: bounded-systems/mint/.github/workflows/npm-publish.yml@<sha>
     with:
       tag: ${{ needs.resolve.outputs.tag }}
 ```
+
+Every job downstream of `cut` carries a **status function**, and that is not
+stylistic. `cut` is skipped on two of the three doors, and GitHub propagates a
+skip through the entire `needs` closure — so a job with `needs: resolve` and no
+`if:` at all is skipped too, even though `resolve` succeeded. `resolve`'s
+`!cancelled()` clears the taint for `resolve` alone, and a plain condition
+clears it for nobody. Omit these and the release goes green having published
+nothing; a dry run cannot tell you, because it skips those same jobs on purpose.
+This cost four repos their tag-push path before site-mcp#43 found it.
 
 `permissions` on the calling job is validated as a **union** with what the called
 workflow declares, at **load time**, before any `if:` runs. Withholding one

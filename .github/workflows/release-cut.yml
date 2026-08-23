@@ -60,6 +60,35 @@
 #         permissions: { contents: write, id-token: write }
 #         uses: bounded-systems/mint/.github/workflows/release-provenance.yml@<sha>
 #
+# ############################################################################
+# # AND THE CHAIN NEEDS STATUS FUNCTIONS, OR IT PUBLISHES NOTHING, GREENLY.  #
+# ############################################################################
+#
+# The second trap in this shape, and it cost four repos a working release path
+# before anyone saw it. Chaining means `cut` is SKIPPED on every door except the
+# dispatch that cuts — a tag push skips it, a recovery dispatch skips it. And
+# GitHub propagates a skip through the ENTIRE `needs` closure, not one hop:
+#
+#     cut        skipped
+#     resolve    success   <- `if: !cancelled() && ...` cleared the taint
+#     verify     SKIPPED   <- `needs: resolve`, no `if:` at all, skipped anyway
+#     publish    SKIPPED
+#
+# Clearing the taint on one job does NOT clear it downstream, and a plain
+# condition (`inputs.recover-tag == ''`) does not clear it at all. So every job
+# in the chain needs its own status function:
+#
+#     if: ${{ !cancelled() && needs.<upstream>.result == 'success' }}
+#
+# `needs.x.result` alone is not enough — it is a context reference, not a status
+# FUNCTION, and only a function makes GitHub run a job whose closure was skipped.
+#
+# The failure is the shape this workflow's header already warns about twice
+# over: a run that goes green having done nothing. It is also invisible to a dry
+# run, which skips those same jobs on purpose — so a green dry run carries no
+# information about it. site-mcp's v0.3.0 recovery was the first execution that
+# could tell the two apart, and it published nothing in seven seconds.
+#
 # The tag-triggered workflows stay valid for a laptop-cut `mint release`. Both
 # paths reach the same end state; they just fire differently. Document which one
 # a given repo uses, or that ambiguity becomes the next stale record.
