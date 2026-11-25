@@ -45,9 +45,10 @@ needs only what `mint release` reads ([#17](https://github.com/bounded-systems/m
 [#18](https://github.com/bounded-systems/mint/issues/18)):
 
 - **`mint plan` and `mint version` read `.release/` intents.** With none, the plan
-  has `bump: null`, and both commands print "nothing to release" and change
-  nothing ([`plan.mjs` L77–80](plan.mjs#L77-L80),
-  [`mint.mjs` L67–70 and L78–81](mint.mjs#L67-L81)).
+  has `bump: null`: `mint version` changes nothing, and both commands print
+  "nothing to release" (`mint plan --json` prints the plan instead)
+  ([`plan.mjs` L77–80](plan.mjs#L77-L80),
+  [`mint.mjs` L63–70 and L78–81](mint.mjs#L63-L81)).
 - **`mint release` does not read `.release/`.** It tags the version already in the
   manifest, taken from the first of `deno.json`, `jsr.json`, `package.json` that
   declares one ([`mint.mjs` L44–58](mint.mjs#L44-L58)). The tag annotation is
@@ -55,10 +56,12 @@ needs only what `mint release` reads ([#17](https://github.com/bounded-systems/m
   it stops with ``no CHANGELOG.md entry for <version> — run `mint version` first.``
   ([`mint.mjs` L148–155](mint.mjs#L148-L155), [`plan.mjs` L60–71](plan.mjs#L60-L71)).
 
-Both commands need a manifest whose `version` is valid semver: without one they
-throw `no manifest with a version field` ([`mint.mjs` L46–58](mint.mjs#L46-L58)),
-and the plan input is validated as semver ([`plan.mjs` L22](plan.mjs#L22)). So
-release #1 takes one of two paths.
+All three commands need a manifest with a `version`: without one they fail with
+`no manifest with a version field` ([`mint.mjs` L46–58](mint.mjs#L46-L58)). It
+must be semver: `mint plan` and `mint version` validate it as such
+([`plan.mjs` L22](plan.mjs#L22)), and `mint release` refuses a tag that is not
+`v<semver>` ([`release.mjs` L55–57](release.mjs#L55-L57)). So release #1 takes
+one of two paths.
 
 **Hand-seed.** Write the first version and its changelog section yourself, then
 commit and release. In `package.json` (or `deno.json` / `jsr.json`) set
@@ -93,7 +96,7 @@ First release.
 mint plan                # preview: 0.0.0 → 0.1.0 (minor)
 mint version             # bumps every manifest present + package-lock.json, writes
                          # CHANGELOG.md (creating it if absent), deletes the intent
-git add -A && git commit -m "Version 0.1.0"
+git add -A package.json CHANGELOG.md .release && git commit -m "Version 0.1.0"
 mint release
 ```
 
@@ -107,7 +110,7 @@ exists or the working tree is dirty, so commit first
 
 **Cutting it in CI instead.** A `workflow_dispatch` caller of
 [`release-cut.yml`](.github/workflows/release-cut.yml) (mint's own `release.yml`
-is one) runs the same checks before it tags: the tag must not exist (L250–261),
+is one) runs its own guards before it tags: the tag must not exist (L250–261),
 `mint plan` must report "nothing to release" (L266–275), and the changelog
 section must exist (L281–288). On the intent path, then, the `mint version`
 commit has to be **merged** before you dispatch; an intent still in `.release/`
@@ -143,9 +146,11 @@ What a refused push leaves behind on the checkout door:
 - **The tag exists locally**, and so does `v<version>.intoto.json`, because both
   are written before the push ([`mint.mjs` L231–237](mint.mjs#L231-L237)).
   Running `mint release` again stops at `tag v<version> already exists`
-  ([`mint.mjs` L223](mint.mjs#L223)). Push that same tag with a permitted
-  identity (`git push origin v<version>`), or delete it (`git tag -d v<version>`)
-  before trying again.
+  ([`mint.mjs` L223](mint.mjs#L223)). Either push that same tag with a
+  permitted identity (`git push origin v<version>`), or delete both before
+  trying again: `git tag -d v<version>` and `rm v<version>.intoto.json`. The
+  statement file is untracked, so if it stays, the re-run stops at `working tree
+  not clean` instead ([`mint.mjs` L207 and L224](mint.mjs#L207-L224)).
 - **Nothing downstream ran.** `release.yml`'s GitHub release, SLSA attestation
   and signed Statement run only once the tag reaches GitHub
   ([`release.yml` L48–50 and L117–180](.github/workflows/release.yml#L48-L180)),
