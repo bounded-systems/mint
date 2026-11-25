@@ -96,7 +96,7 @@ First release.
 mint plan                # preview: 0.0.0 → 0.1.0 (minor)
 mint version             # bumps every manifest present + package-lock.json, writes
                          # CHANGELOG.md (creating it if absent), deletes the intent
-git add -A package.json CHANGELOG.md .release && git commit -m "Version 0.1.0"
+git add -A && git commit -m "Version 0.1.0"
 mint release
 ```
 
