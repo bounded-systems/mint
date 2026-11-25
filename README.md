@@ -38,6 +38,134 @@ mint release   # cut the v<version> tag + emit release provenance (CI keyless-si
 `mint plan --json` emits the machine-readable plan. `--date YYYY-MM-DD` pins the
 changelog date (the pure core never reads the clock; the CLI injects it).
 
+## First release
+
+`mint version` and `mint release` read different inputs, and a brand-new repo
+needs only what `mint release` reads ([#17](https://github.com/bounded-systems/mint/issues/17),
+[#18](https://github.com/bounded-systems/mint/issues/18)):
+
+- **`mint plan` and `mint version` read `.release/` intents.** With none, the plan
+  has `bump: null`, and both commands print "nothing to release" and change
+  nothing ([`plan.mjs` L77–80](plan.mjs#L77-L80),
+  [`mint.mjs` L67–70 and L78–81](mint.mjs#L67-L81)).
+- **`mint release` does not read `.release/`.** It tags the version already in the
+  manifest, taken from the first of `deno.json`, `jsr.json`, `package.json` that
+  declares one ([`mint.mjs` L44–58](mint.mjs#L44-L58)). The tag annotation is
+  that version's `## <version>` section of `CHANGELOG.md`; with no such section
+  it stops with ``no CHANGELOG.md entry for <version> — run `mint version` first.``
+  ([`mint.mjs` L148–155](mint.mjs#L148-L155), [`plan.mjs` L60–71](plan.mjs#L60-L71)).
+
+Both commands need a manifest whose `version` is valid semver: without one they
+throw `no manifest with a version field` ([`mint.mjs` L46–58](mint.mjs#L46-L58)),
+and the plan input is validated as semver ([`plan.mjs` L22](plan.mjs#L22)). So
+release #1 takes one of two paths.
+
+**Hand-seed.** Write the first version and its changelog section yourself, then
+commit and release. In `package.json` (or `deno.json` / `jsr.json`) set
+`"version": "0.1.0"`, and start `CHANGELOG.md` with:
+
+```markdown
+# Changelog
+
+## 0.1.0 — 2026-11-25
+
+- First release.
+```
+
+```sh
+git add package.json CHANGELOG.md && git commit -m "Version 0.1.0"
+mint release --dry-run   # preview the tag and the statement; touches nothing
+mint release
+```
+
+**Intent path.** Seed a base version, add one intent, and let `mint version`
+write the rest. Set `"version": "0.0.0"` in the manifest and add
+`.release/first-release.md`:
+
+```markdown
+---
+bump: minor
+---
+First release.
+```
+
+```sh
+mint plan                # preview: 0.0.0 → 0.1.0 (minor)
+mint version             # bumps every manifest present + package-lock.json, writes
+                         # CHANGELOG.md (creating it if absent), deletes the intent
+git add -A && git commit -m "Version 0.1.0"
+mint release
+```
+
+The seed plus the intent's `bump` decides the first number, because `mint
+version` bumps with `semver.inc`: `0.0.0` + `minor` gives `0.1.0`
+([`plan.mjs` L81](plan.mjs#L81), [`mint.mjs` L83–120](mint.mjs#L83-L120)).
+
+Either path ends in `mint release`, which refuses to run when the tag already
+exists or the working tree is dirty, so commit first
+([`mint.mjs` L222–224](mint.mjs#L222-L224)).
+
+**Cutting it in CI instead.** A `workflow_dispatch` caller of
+[`release-cut.yml`](.github/workflows/release-cut.yml) (mint's own `release.yml`
+is one) runs the same checks before it tags: the tag must not exist (L250–261),
+`mint plan` must report "nothing to release" (L266–275), and the changelog
+section must exist (L281–288). On the intent path, then, the `mint version`
+commit has to be **merged** before you dispatch; an intent still in `.release/`
+fails the cut. `dry-run` defaults to `true`
+([`release-cut.yml` L118–121](.github/workflows/release-cut.yml#L118-L121),
+[`release.yml` L57–60](.github/workflows/release.yml#L57-L60)): dispatch once to
+watch every check pass, then again with it unchecked.
+
+### The tag push needs an identity allowed to create `v*` tags
+
+Both doors create the tag with `git tag` and push it with `git push`, under
+whatever credential the pushing git process holds:
+
+| Door | Creates the tag | Pushes it |
+| --- | --- | --- |
+| `mint release` from a checkout | `git tag` ([`mint.mjs` L231](mint.mjs#L231)) | `git push <remote> <tag>` with your git credentials ([`mint.mjs` L237](mint.mjs#L237)) |
+| `workflow_dispatch` → `release-cut.yml` | `git tag -a` ([`release-cut.yml` L331](.github/workflows/release-cut.yml#L331)) | `git push origin "$TAG"` with the job's token, granted `contents: write` ([`release-cut.yml` L133–134 and L332](.github/workflows/release-cut.yml#L133-L332); [`release.yml` L74–75](.github/workflows/release.yml#L74-L75)) |
+
+mint does not create tags through the GitHub API, and it does not check in
+advance whether the push will be accepted. If your org or enterprise restricts
+who may create tags, **the pushing identity in that table must be allowed to
+create `v*` tags before your first release**. #18 suggests making it a ruleset
+bypass actor, such as a release App or bot. Otherwise the push is refused, as
+`bounded-systems/repo-health`'s first release was
+([#17](https://github.com/bounded-systems/mint/issues/17)):
+
+```text
+! [remote rejected] v0.1.0 -> v0.1.0 (Cannot create ref due to creations being restricted)
+```
+
+What a refused push leaves behind on the checkout door:
+
+- **The tag exists locally**, and so does `v<version>.intoto.json`, because both
+  are written before the push ([`mint.mjs` L231–237](mint.mjs#L231-L237)).
+  Running `mint release` again stops at `tag v<version> already exists`
+  ([`mint.mjs` L223](mint.mjs#L223)). Push that same tag with a permitted
+  identity (`git push origin v<version>`), or delete it (`git tag -d v<version>`)
+  before trying again.
+- **Nothing downstream ran.** `release.yml`'s GitHub release, SLSA attestation
+  and signed Statement run only once the tag reaches GitHub
+  ([`release.yml` L48–50 and L117–180](.github/workflows/release.yml#L48-L180)),
+  and so does an adopter's `release-provenance.yml` caller
+  ([its header, L1–19](.github/workflows/release-provenance.yml#L1-L19)).
+
+To cut the tag on your machine but have a permitted identity push it, split the
+two steps with `--no-push` ([`mint.mjs` L189 and L237](mint.mjs#L189-L237)):
+
+```sh
+mint release --no-push   # create the tag and write the statement; push nothing
+git push origin v0.1.0   # run under the credential your rules permit
+```
+
+On the CI door, a tag pushed with the workflow's `GITHUB_TOKEN` starts no other
+workflow runs. That is why `release.yml` chains its publish jobs after `cut`
+rather than waiting for the tag push to trigger them
+([`release.yml` L31–34](.github/workflows/release.yml#L31-L34),
+[`release-cut.yml` L35–44](.github/workflows/release-cut.yml#L35-L44)).
+
 ## Release provenance
 
 `mint release` cuts the annotated tag `v<version>` (signed when a git signing key
